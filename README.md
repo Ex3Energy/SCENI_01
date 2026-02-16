@@ -2,35 +2,46 @@
 
 Super Critical Energy Infrastructure platform.
 
-## Si tienes poca experiencia: usa este camino (recomendado)
+## ¿Por qué te falló `cd /workspace/SCENI_01` en Windows?
 
-### Paso 1: crea una carpeta nueva con todo listo (1 comando)
+Esa ruta (`/workspace/SCENI_01`) es del entorno Linux de este chat, no de tu PC con PowerShell.
+En tu equipo debes usar la ruta local donde está tu carpeta, por ejemplo:
 
-```bash
-./setup_sceni_project.sh
+```powershell
+cd "C:\Users\SantiagoParraPosada\OneDrive - ERCO ENERGIA SAS\Desktop\EX3Energy\SCENI_1"
 ```
 
-Crea `SCENI_01_NUEVO` con todos los archivos.
+## Flujo recomendado para principiantes
 
-### Paso 2: abre esa carpeta en VS Code
+### Opción A (Windows / PowerShell)
 
-```bash
-code SCENI_01_NUEVO
+1) Abre PowerShell dentro de tu carpeta del proyecto (la que ya tienes en tu escritorio).
+
+2) Ejecuta el script para crear una carpeta nueva lista:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup_sceni_project.ps1
 ```
 
-### Paso 3: ejecuta la app (sin instalar paquetes)
+3) Entra a la carpeta creada y ejecuta:
 
-```bash
-cd SCENI_01_NUEVO
-python app/main.py
+```powershell
+cd .\SCENI_01_NUEVO
+python .\app\main.py
 ```
 
-Abre en navegador:
+4) Abre en navegador:
 
 - http://localhost:8000/
 - http://localhost:8000/health
 
----
+### Opción B (Linux / macOS / Git Bash)
+
+```bash
+./setup_sceni_project.sh
+cd SCENI_01_NUEVO
+python app/main.py
+```
 
 ## Alternativa con Docker
 
