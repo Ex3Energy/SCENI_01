@@ -11,24 +11,41 @@ fi
 mkdir -p "$TARGET_DIR/app"
 
 cat > "$TARGET_DIR/app/main.py" <<'PYEOF'
-from fastapi import FastAPI
-
-app = FastAPI(title="SCENI_01 API", version="0.1.0")
-
-
-@app.get("/")
-def read_root() -> dict[str, str]:
-    return {"service": "SCENI_01", "status": "ok"}
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"health": "up"}
+class Handler(BaseHTTPRequestHandler):
+    def _send_json(self, status_code: int, payload: dict[str, str]) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/":
+            self._send_json(200, {"service": "SCENI_01", "status": "ok"})
+            return
+        if self.path == "/health":
+            self._send_json(200, {"health": "up"})
+            return
+        self._send_json(404, {"error": "not_found"})
+
+
+def run() -> None:
+    server = HTTPServer(("0.0.0.0", 8000), Handler)
+    print("SCENI_01 running on http://localhost:8000")
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    run()
 PYEOF
 
 cat > "$TARGET_DIR/requirements.txt" <<'REQEOF'
-fastapi==0.116.1
-uvicorn[standard]==0.35.0
+# No external dependencies required.
 REQEOF
 
 cat > "$TARGET_DIR/Dockerfile" <<'DOCKEOF'
@@ -39,14 +56,11 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
 COPY app ./app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "app/main.py"]
 DOCKEOF
 
 cat > "$TARGET_DIR/docker-compose.yml" <<'COMPOSEEOF'
@@ -72,19 +86,15 @@ IGNOREEOF
 cat > "$TARGET_DIR/README.md" <<'READEOF'
 # SCENI_01 (carpeta generada automáticamente)
 
-## 1) Ejecutar local (sin Docker)
+## 1) Ejecutar local (sin dependencias externas)
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python app/main.py
 ```
 
 Abrir:
 - http://localhost:8000/
 - http://localhost:8000/health
-- http://localhost:8000/docs
 
 ## 2) Ejecutar con Docker
 
