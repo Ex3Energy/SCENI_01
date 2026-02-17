@@ -3,11 +3,29 @@ Super Critical Energy Infrastructure platform.
 
 ## ¿Por qué falla `cd /workspace/SCENI_01` en Windows?
 Esa ruta (`/workspace/SCENI_01`) pertenece al entorno Linux de este chat, no a tu PC con PowerShell.
-En tu equipo debes usar tu ruta local, por ejemplo:
+En tu equipo debes usar la ruta local, por ejemplo:
 
 ```powershell
 cd "C:\Users\SantiagoParraPosada\OneDrive - ERCO ENERGIA SAS\Desktop\EX3Energy\SCENI_1"
 ```
+
+## Compilación completa (ver el desarrollo en acción)
+
+### Windows (PowerShell)
+```powershell
+powershell -ExecutionPolicy Bypass -File .\compile_and_smoke_test.ps1
+```
+
+### Linux / macOS / Git Bash
+```bash
+./compile_and_smoke_test.sh
+```
+
+Estos scripts levantan automáticamente:
+- Frontend estático en `http://localhost:4173`
+- API demo en `http://localhost:8000`
+
+Y validan smoke tests de ambos servicios (`/`, `/app.js`, `/health`).
 
 ## Flujo recomendado para principiantes
 
@@ -59,8 +77,16 @@ SCENI_01_NUEVO/
 ```
 
 ## Publicación en GitHub Pages (sitio estático demo)
-El repositorio también contiene una demo web estática (`index.html`, `styles.css`, `app.js`) y workflow para GitHub Pages.
-Si quieres probar esa versión visual:
-1. Haz push a `main`.
-2. En GitHub, ve a **Settings → Pages** y selecciona **Source: GitHub Actions**.
-3. Espera el workflow **Deploy static site to GitHub Pages** en verde.
+Si en GitHub solo ves `README.md`, casi siempre estás viendo otra rama o no hiciste push de la rama correcta.
+
+1. Verifica rama actual:
+   ```bash
+   git branch --show-current
+   ```
+2. Sube exactamente esa rama:
+   ```bash
+   git push -u origin <tu-rama>
+   ```
+3. Para Pages en rama `main`, haz merge/push a `main`.
+4. En GitHub, ve a **Settings → Pages** y selecciona **Source: GitHub Actions**.
+5. Espera el workflow **Deploy static site to GitHub Pages** en verde.
