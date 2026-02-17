@@ -51,7 +51,10 @@
                 Horizonte (horas)
                 <input type="number" name="horizonHours" min="24" max="8760" value="168" required />
               </label>
-              <button class="btn btn-primary" type="submit">Crear y simular</button>
+              <div class="inline-actions">
+                <button class="btn btn-primary" type="submit">Crear y simular</button>
+                <button class="btn" id="check-backend" type="button">Probar conexión backend</button>
+              </div>
               <p id="dashboard-feedback" class="feedback" role="status" aria-live="polite"></p>
             </form>
 

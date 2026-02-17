@@ -70,6 +70,19 @@ th { background: #f7fbff; }
 .disclaimer { margin-top: 1rem; color: #4b5b6d; font-size: 0.88rem; }
 
 .form { display: grid; gap: 0.9rem; }
+
+.inline-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.inline-actions .btn:not(.btn-primary) {
+  background: #f2f6fb;
+  border-color: #c9d8e8;
+  color: #0d1b2a;
+}
+
 label { display: grid; gap: 0.4rem; font-weight: 600; }
 input, select {
   width: 100%;

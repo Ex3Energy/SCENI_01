@@ -17,6 +17,26 @@ const resilienceFactor = {
   "mission-critical": 1.27,
 };
 
+
+function getDefaultApiBaseUrl() {
+  if (window.location.hostname.includes("github.io")) {
+    return "";
+  }
+  return "http://localhost:8000";
+}
+
+async function checkBackendConnection(baseUrl) {
+  const normalized = String(baseUrl || "").trim().replace(/\/$/, "");
+  if (!normalized) {
+    throw new Error("Define una URL de backend (ej: https://tu-backend.onrender.com)");
+  }
+  const response = await fetch(`${normalized}/health`);
+  if (!response.ok) {
+    throw new Error(`Backend responde ${response.status}`);
+  }
+  return normalized;
+}
+
 function formatMusd(value) {
   return `${value.toFixed(1)} MUSD`;
 }
@@ -115,6 +135,18 @@ function renderDashboardSummary(simulation, market) {
 async function setupDashboard() {
   const form = document.getElementById("opportunity-form");
   const feedback = document.getElementById("dashboard-feedback");
+  const checkButton = document.getElementById("check-backend");
+  const apiInput = form.querySelector('input[name="apiBaseUrl"]');
+  apiInput.value = getDefaultApiBaseUrl();
+
+  checkButton.addEventListener("click", async () => {
+    try {
+      const base = await checkBackendConnection(apiInput.value);
+      feedback.textContent = `Conexión OK con backend en ${base}.`;
+    } catch (error) {
+      feedback.textContent = `Sin conexión backend: ${error.message}`;
+    }
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -131,6 +163,8 @@ async function setupDashboard() {
     };
 
     try {
+      await checkBackendConnection(baseUrl);
+
       const createRes = await fetch(`${baseUrl}/api/v1/opportunities`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -153,7 +187,7 @@ async function setupDashboard() {
       renderDashboardSummary(simulation, market);
       feedback.textContent = `Simulación lista para ${opp.name}.`; 
     } catch (error) {
-      feedback.textContent = `Error: ${error.message}. Verifica que el backend esté activo en ${baseUrl}.`;
+      feedback.textContent = `Error: ${error.message}. Si usas GitHub Pages, localhost no funciona en la nube; ejecuta backend local o usa una URL pública.`;
     }
   });
 }
