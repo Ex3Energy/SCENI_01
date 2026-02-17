@@ -1,21 +1,17 @@
-# SCENI_01_NUEVO
+# SCENI_01_NUEVO Backend
 
-## Ejecutar local
+Backend HTTP del motor de decisión SCENI.
+
+## Ejecutar
 ```bash
 python app/main.py
 ```
 
-Endpoints:
-- http://localhost:8000/
-- http://localhost:8000/health
-
-## Ejecutar con Docker
-```bash
-docker compose up --build -d
-docker compose logs -f
-```
-
-Detener:
-```bash
-docker compose down
-```
+## Endpoints principales
+- `GET /health`
+- `POST /api/v1/opportunities`
+- `POST /api/v1/opportunities/{id}/simulate`
+- `GET /api/v1/opportunities/{id}/designs`
+- `GET /api/v1/snapshots/{snapshot_id}`
+- `GET /api/v1/market/ercot/{node}`
+- `GET /docs`

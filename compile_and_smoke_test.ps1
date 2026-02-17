@@ -32,7 +32,7 @@ try {
   if ($home.Content -notmatch "SCENI_01") { throw "Frontend no contiene SCENI_01" }
 
   $js = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$StaticPort/app.js"
-  if ($js.Content -notmatch "renderCards") { throw "app.js no contiene renderCards" }
+  if ($js.Content -notmatch "setupDashboard") { throw "app.js no contiene lógica dashboard" }
 
   $ready = $false
   for ($i = 0; $i -lt 10; $i++) {
@@ -48,14 +48,17 @@ try {
   if (-not $ready) { throw "API no disponible en puerto $ApiPort" }
 
   $apiRoot = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$ApiPort/"
-  if ($apiRoot.Content -notmatch '"status": "ok"') { throw "API / no responde status ok" }
+  if ($apiRoot.Content -notmatch '"status":"ok"|"status": "ok"') { throw "API / no responde status ok" }
 
   $health = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$ApiPort/health"
-  if ($health.Content -notmatch '"status": "healthy"') { throw "API /health no responde healthy" }
+  if ($health.Content -notmatch '"status":"healthy"|"status": "healthy"') { throw "API /health no responde healthy" }
+
+  $docs = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$ApiPort/docs"
+  if ($docs.Content -notmatch "available_endpoints") { throw "API /docs no responde" }
 
   Write-Host "[5/5] OK - Desarrollo en acción"
   Write-Host "- Frontend: http://localhost:$StaticPort"
-  Write-Host "- API:      http://localhost:$ApiPort/health"
+  Write-Host "- API:      http://localhost:$ApiPort/docs"
 }
 finally {
   if ($static -and -not $static.HasExited) { Stop-Process -Id $static.Id -Force }

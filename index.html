@@ -11,47 +11,87 @@
       <div class="container">
         <p class="tag">Demo funcional</p>
         <h1>SCENI_01</h1>
-        <p class="subtitle">Super Critical Energy Infrastructure platform</p>
+        <p class="subtitle">Decision Support System para infraestructura energética crítica</p>
         <div class="hero-actions">
-          <a href="#estado" class="btn btn-primary">Ver estado operativo</a>
+          <a href="#dashboard" class="btn btn-primary">Ejecutar simulación SCENI</a>
           <a href="#estimador" class="btn btn-outline">Calcular proyecto en Texas</a>
         </div>
       </div>
     </header>
 
     <main>
-      <section id="estado" class="section">
+      <section id="dashboard" class="section">
         <div class="container">
-          <h2>Estado de infraestructura (simulado)</h2>
-          <p>Panel de referencia para validar navegación, visualización y flujos de la demo.</p>
-          <div id="status-grid" class="status-grid" aria-live="polite"></div>
+          <h2>Dashboard SCENI (Opportunity → Candidates → Ranking)</h2>
+          <p>Crea una oportunidad, ejecuta simulación determinística y revisa ranking de diseños con Firm Energy.</p>
+
+          <div class="estimator-layout">
+            <form id="opportunity-form" class="card form">
+              <label>
+                API Base URL
+                <input type="text" name="apiBaseUrl" value="http://localhost:8000" required />
+              </label>
+              <label>
+                Nombre de oportunidad
+                <input type="text" name="name" value="Texas Critical Load - Demo" required />
+              </label>
+              <label>
+                Nodo ERCOT
+                <input type="text" name="ercotNode" value="HB_HOUSTON" required />
+              </label>
+              <label>
+                Demanda media (MW)
+                <input type="number" name="demandMw" min="5" max="1000" value="120" required />
+              </label>
+              <label>
+                Límite POI/Grid (MW)
+                <input type="number" name="poiLimitMw" min="1" max="500" value="45" required />
+              </label>
+              <label>
+                Horizonte (horas)
+                <input type="number" name="horizonHours" min="24" max="8760" value="168" required />
+              </label>
+              <button class="btn btn-primary" type="submit">Crear y simular</button>
+              <p id="dashboard-feedback" class="feedback" role="status" aria-live="polite"></p>
+            </form>
+
+            <article class="card estimate-result">
+              <h3>Resumen de recomendación</h3>
+              <div id="dashboard-output" class="estimate-output">Aún no hay simulación ejecutada.</div>
+            </article>
+          </div>
+
+          <div class="card table-card">
+            <h3>Top diseños</h3>
+            <div class="table-wrap">
+              <table id="designs-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Firm Energy %</th>
+                    <th>Unserved MWh</th>
+                    <th>IRR %</th>
+                    <th>Score</th>
+                    <th>Snapshot</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="6">Sin datos aún.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section class="section section-muted">
-        <div class="container">
-          <h2>Flujos críticos</h2>
-          <ul class="checklist">
-            <li>Monitoreo de subestaciones y nodos.</li>
-            <li>Alertamiento temprano de incidentes.</li>
-            <li>Trazabilidad de eventos operativos.</li>
-            <li>Consolidación de KPIs para operación.</li>
-          </ul>
-        </div>
-      </section>
-
-      <section id="estimador" class="section">
+      <section id="estimador" class="section section-muted">
         <div class="container">
           <h2>Estimador de infraestructura crítica (Texas)</h2>
-          <p>
-            Simula CAPEX, cronograma y recomendación de ubicación para una nueva infraestructura
-            energética crítica en Texas.
-          </p>
+          <p>Simula CAPEX, cronograma y recomendación de ubicación para una nueva infraestructura energética crítica en Texas.</p>
 
           <div class="estimator-layout">
             <form id="estimate-form" class="card form">
-              <label>
-                Región objetivo
+              <label>Región objetivo
                 <select name="region" required>
                   <option value="houston-gulf">Houston / Gulf Coast</option>
                   <option value="dallas-fortworth">Dallas–Fort Worth</option>
@@ -59,87 +99,45 @@
                   <option value="austin-sanantonio">Austin / San Antonio</option>
                 </select>
               </label>
-
-              <label>
-                Tipo de proyecto
+              <label>Tipo de proyecto
                 <select name="projectType" required>
                   <option value="substation">Subestación de alta criticidad</option>
                   <option value="hybrid-plant">Planta híbrida (solar + storage)</option>
                   <option value="microgrid">Microgrid industrial crítica</option>
                 </select>
               </label>
-
-              <label>
-                Capacidad objetivo (MW)
+              <label>Capacidad objetivo (MW)
                 <input type="number" name="capacityMw" min="10" max="2000" step="1" value="120" required />
               </label>
-
-              <label>
-                Duración de almacenamiento (horas)
+              <label>Duración de almacenamiento (horas)
                 <input type="number" name="storageHours" min="0" max="12" step="0.5" value="4" required />
               </label>
-
-              <label>
-                Distancia a nodo de transmisión (km)
+              <label>Distancia a nodo de transmisión (km)
                 <input type="number" name="distanceKm" min="1" max="120" step="1" value="18" required />
               </label>
-
-              <label>
-                Nivel de resiliencia requerido
+              <label>Nivel de resiliencia requerido
                 <select name="resilience" required>
                   <option value="standard">Estándar</option>
                   <option value="high">Alta</option>
                   <option value="mission-critical">Mission Critical</option>
                 </select>
               </label>
-
               <button class="btn btn-primary" type="submit">Calcular estimación</button>
             </form>
 
             <article class="card estimate-result">
               <h3>Resultado estimado</h3>
-              <div id="estimate-output" class="estimate-output" aria-live="polite">
-                Completa el formulario para ver costos y recomendación.
-              </div>
-              <p class="disclaimer">
-                * Estimaciones de demo orientativas (no reemplazan ingeniería de detalle, due diligence
-                legal/ambiental ni estudios ERCOT).
-              </p>
+              <div id="estimate-output" class="estimate-output" aria-live="polite">Completa el formulario para ver costos y recomendación.</div>
+              <p class="disclaimer">* Estimaciones de demo orientativas (no reemplazan ingeniería de detalle ni due diligence).</p>
             </article>
           </div>
-        </div>
-      </section>
-
-      <section id="contacto" class="section section-muted">
-        <div class="container">
-          <h2>Solicitud de piloto</h2>
-          <form id="pilot-form" class="card form">
-            <label>
-              Nombre de empresa
-              <input type="text" name="company" required />
-            </label>
-            <label>
-              Email de contacto
-              <input type="email" name="email" required />
-            </label>
-            <label>
-              Prioridad
-              <select name="priority">
-                <option>Alta</option>
-                <option>Media</option>
-                <option>Baja</option>
-              </select>
-            </label>
-            <button class="btn btn-primary" type="submit">Enviar solicitud</button>
-            <p id="form-feedback" class="feedback" role="status" aria-live="polite"></p>
-          </form>
         </div>
       </section>
     </main>
 
     <footer>
       <div class="container footer-row">
-        <span>SCENI_01 demo</span>
+        <span>SCENI demo</span>
         <span id="build-date"></span>
       </div>
     </footer>

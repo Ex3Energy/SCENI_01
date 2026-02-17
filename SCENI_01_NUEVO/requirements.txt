@@ -1,1 +1,1 @@
-# Este proyecto demo usa solo librería estándar de Python.
+# No external dependencies required.
