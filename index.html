@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SCENI_01 | Demo</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="container">
+        <p class="tag">Demo funcional</p>
+        <h1>SCENI_01</h1>
+        <p class="subtitle">Super Critical Energy Infrastructure platform</p>
+        <div class="hero-actions">
+          <a href="#estado" class="btn btn-primary">Ver estado operativo</a>
+          <a href="#contacto" class="btn btn-outline">Solicitar acceso piloto</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="estado" class="section">
+        <div class="container">
+          <h2>Estado de infraestructura (simulado)</h2>
+          <p>Panel de referencia para validar navegación, visualización y flujos de la demo.</p>
+          <div id="status-grid" class="status-grid" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="section section-muted">
+        <div class="container">
+          <h2>Flujos críticos</h2>
+          <ul class="checklist">
+            <li>Monitoreo de subestaciones y nodos.</li>
+            <li>Alertamiento temprano de incidentes.</li>
+            <li>Trazabilidad de eventos operativos.</li>
+            <li>Consolidación de KPIs para operación.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="contacto" class="section">
+        <div class="container">
+          <h2>Solicitud de piloto</h2>
+          <form id="pilot-form" class="card form">
+            <label>
+              Nombre de empresa
+              <input type="text" name="company" required />
+            </label>
+            <label>
+              Email de contacto
+              <input type="email" name="email" required />
+            </label>
+            <label>
+              Prioridad
+              <select name="priority">
+                <option>Alta</option>
+                <option>Media</option>
+                <option>Baja</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" type="submit">Enviar solicitud</button>
+            <p id="form-feedback" class="feedback" role="status" aria-live="polite"></p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container footer-row">
+        <span>SCENI_01 demo</span>
+        <span id="build-date"></span>
+      </div>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
