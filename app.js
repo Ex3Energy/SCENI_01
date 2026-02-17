@@ -25,71 +25,77 @@ function getDefaultApiBaseUrl() {
   return "http://localhost:8000";
 }
 
+function isLocalHost(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
 function normalizeApiBaseUrl(baseUrl) {
-  let normalized = String(baseUrl || "").trim().replace(/\/$/, "");
-  if (!normalized) {
+  const raw = String(baseUrl || "").trim();
+  if (!raw) {
     throw new Error("Define una URL de backend (ej: https://tu-backend.onrender.com)");
   }
 
-  if (!/^https?:\/\//i.test(normalized)) {
-    normalized = `${window.location.protocol}//${normalized}`;
+  const frontendHost = window.location.hostname;
+  const frontendProtocol = window.location.protocol;
+  const frontendIsHosted = !isLocalHost(frontendHost);
+
+  let candidate = raw;
+  if (!/^https?:\/\//i.test(candidate)) {
+    candidate = `${frontendIsHosted ? "https:" : frontendProtocol}//${candidate}`;
   }
 
-  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized);
-  if (window.location.protocol === "https:" && normalized.startsWith("http://") && !isLocal) {
-    normalized = normalized.replace("http://", "https://");
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error("URL de backend inválida. Ejemplo: https://tu-backend.onrender.com");
   }
 
-  return normalized;
+  const backendIsLocal = isLocalHost(url.hostname);
+
+  if (frontendIsHosted && backendIsLocal) {
+    throw new Error("`localhost` desde GitHub Pages apunta a TU computador; usa URL pública HTTPS.");
+  }
+
+  if (frontendProtocol === "https:" && url.protocol === "http:" && !backendIsLocal) {
+    url.protocol = "https:";
+  }
+
+  url.pathname = url.pathname.replace(/\/$/, "");
+  return url.toString().replace(/\/$/, "");
 }
 
 function buildFetchErrorMessage(error, normalizedBaseUrl) {
-  if (error?.name === "TypeError") {
-    const isHttpsPage = window.location.protocol === "https:";
-    const isHttpBackend = normalizedBaseUrl.startsWith("http://");
+  const isHttpsPage = window.location.protocol === "https:";
+  const isHttpBackend = /^http:\/\//i.test(normalizedBaseUrl);
 
-    if (isHttpsPage && isHttpBackend) {
-      return "Bloqueo por contenido mixto (HTTPS→HTTP). Usa backend con HTTPS.";
-    }
-
-    if (/localhost|127\.0\.0\.1/.test(normalizedBaseUrl) && !["localhost", "127.0.0.1"].includes(window.location.hostname)) {
-      return "`localhost` desde GitHub Pages apunta a TU computador; ejecuta backend local o usa URL pública.";
-    }
-
-    return "No se pudo conectar al backend (red/CORS/URL).";
+  if (error?.name === "AbortError") {
+    return "Timeout conectando al backend. Revisa que el servicio esté levantado y accesible.";
   }
 
-  return error?.message || "Error desconocido de conexión";
+  if (isHttpsPage && isHttpBackend) {
+    return "Bloqueo por contenido mixto (HTTPS→HTTP). Usa backend con HTTPS.";
+  }
+
+  return error?.message || "No se pudo conectar al backend (red/CORS/URL).";
 }
 
 async function checkBackendConnection(baseUrl) {
   const normalized = normalizeApiBaseUrl(baseUrl);
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
   try {
-    const response = await fetch(`${normalized}/health`, { method: "GET" });
+    const response = await fetch(`${normalized}/health`, { method: "GET", signal: controller.signal });
     if (!response.ok) {
       throw new Error(`Backend responde ${response.status}`);
     }
     return normalized;
   } catch (error) {
-    const canAutoUpgrade =
-      window.location.protocol === "https:" &&
-      normalized.startsWith("http://") &&
-      !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized);
-
-    if (canAutoUpgrade) {
-      const httpsCandidate = normalized.replace("http://", "https://");
-      try {
-        const retryResponse = await fetch(`${httpsCandidate}/health`, { method: "GET" });
-        if (retryResponse.ok) {
-          return httpsCandidate;
-        }
-      } catch {
-        // keep original diagnostic below
-      }
-    }
-
     throw new Error(buildFetchErrorMessage(error, normalized));
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -200,7 +206,12 @@ async function setupDashboard() {
       const previousValue = apiInput.value;
       const base = await checkBackendConnection(previousValue);
       apiInput.value = base;
-      const autoCorrected = normalizeApiBaseUrl(previousValue) !== base;
+      let autoCorrected = false;
+      try {
+        autoCorrected = normalizeApiBaseUrl(previousValue) !== base;
+      } catch {
+        autoCorrected = false;
+      }
       feedback.textContent = `Conexión OK con backend en ${base}.` + (autoCorrected ? " (URL corregida automáticamente)" : "");
     } catch (error) {
       feedback.textContent = `Sin conexión backend: ${error.message}`;

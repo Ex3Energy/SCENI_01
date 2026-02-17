@@ -29,7 +29,7 @@
             <form id="opportunity-form" class="card form">
               <label>
                 API Base URL
-                <input type="text" name="apiBaseUrl" value="http://localhost:8000" required />
+                <input type="text" name="apiBaseUrl" value="http://localhost:8000" placeholder="https://tu-backend.onrender.com" required />
               </label>
               <label>
                 Nombre de oportunidad
@@ -55,6 +55,7 @@
                 <button class="btn btn-primary" type="submit">Crear y simular</button>
                 <button class="btn" id="check-backend" type="button">Probar conexión backend</button>
               </div>
+              <p class="hint">Tip: en GitHub Pages usa una URL pública HTTPS de backend.</p>
               <p id="dashboard-feedback" class="feedback" role="status" aria-live="polite"></p>
             </form>
 
