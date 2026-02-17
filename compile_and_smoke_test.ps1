@@ -34,6 +34,19 @@ try {
   $js = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$StaticPort/app.js"
   if ($js.Content -notmatch "renderCards") { throw "app.js no contiene renderCards" }
 
+  $ready = $false
+  for ($i = 0; $i -lt 10; $i++) {
+    try {
+      Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$ApiPort/health" | Out-Null
+      $ready = $true
+      break
+    }
+    catch {
+      Start-Sleep -Milliseconds 500
+    }
+  }
+  if (-not $ready) { throw "API no disponible en puerto $ApiPort" }
+
   $apiRoot = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$ApiPort/"
   if ($apiRoot.Content -notmatch '"status": "ok"') { throw "API / no responde status ok" }
 

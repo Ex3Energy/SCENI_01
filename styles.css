@@ -80,12 +80,34 @@ h1 {
   gap: 1rem;
 }
 
+.estimator-layout {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 1rem;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 1rem;
   box-shadow: 0 2px 8px rgba(8, 20, 38, 0.06);
+}
+
+.estimate-result h3 {
+  margin-top: 0;
+}
+
+.estimate-output {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.disclaimer {
+  margin-top: 1rem;
+  color: #4b5b6d;
+  font-size: 0.88rem;
 }
 
 .status-pill {
@@ -117,7 +139,6 @@ h1 {
 }
 
 .form {
-  max-width: 560px;
   display: grid;
   gap: 0.9rem;
 }
@@ -178,4 +199,10 @@ footer {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+@media (max-width: 860px) {
+  .estimator-layout {
+    grid-template-columns: 1fr;
+  }
 }

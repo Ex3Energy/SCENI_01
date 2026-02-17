@@ -34,6 +34,14 @@ sleep 1
 echo "[4/5] Ejecutando smoke tests..."
 curl -fsS "http://127.0.0.1:${STATIC_PORT}/" | rg -q "SCENI_01"
 curl -fsS "http://127.0.0.1:${STATIC_PORT}/app.js" | rg -q "renderCards"
+
+for _ in {1..10}; do
+  if curl -fsS "http://127.0.0.1:${API_PORT}/health" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+
 curl -fsS "http://127.0.0.1:${API_PORT}/" | rg -q '"status": "ok"'
 curl -fsS "http://127.0.0.1:${API_PORT}/health" | rg -q '"status": "healthy"'
 

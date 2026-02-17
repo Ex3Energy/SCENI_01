@@ -90,3 +90,7 @@ Si en GitHub solo ves `README.md`, casi siempre estás viendo otra rama o no hic
 3. Para Pages en rama `main`, haz merge/push a `main`.
 4. En GitHub, ve a **Settings → Pages** y selecciona **Source: GitHub Actions**.
 5. Espera el workflow **Deploy static site to GitHub Pages** en verde.
+
+
+## Nuevo en la demo
+- Estimador de infraestructura crítica para Texas (CAPEX, cronograma y recomendación de ubicación).
