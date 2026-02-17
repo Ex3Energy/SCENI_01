@@ -37,6 +37,7 @@ powershell -ExecutionPolicy Bypass -File .\compile_and_smoke_test.ps1
 
 ## Troubleshooting: "Failed to fetch" en Crear y simular
 - Ese error significa que el frontend no puede llegar al backend en `API Base URL`.
+- Si el frontend está en **HTTPS** y tu backend está en **HTTP** (no localhost), el navegador bloquea la petición (mixed content). Usa backend con HTTPS.
 - Si abres la UI desde GitHub Pages, `http://localhost:8000` apunta a **tu PC**, no a GitHub.
 - Solución rápida:
   1. Ejecuta backend local: `cd SCENI_01_NUEVO && python app/main.py`

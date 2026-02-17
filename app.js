@@ -25,16 +25,55 @@ function getDefaultApiBaseUrl() {
   return "http://localhost:8000";
 }
 
-async function checkBackendConnection(baseUrl) {
-  const normalized = String(baseUrl || "").trim().replace(/\/$/, "");
+function normalizeApiBaseUrl(baseUrl) {
+  let normalized = String(baseUrl || "").trim().replace(/\/$/, "");
   if (!normalized) {
     throw new Error("Define una URL de backend (ej: https://tu-backend.onrender.com)");
   }
-  const response = await fetch(`${normalized}/health`);
-  if (!response.ok) {
-    throw new Error(`Backend responde ${response.status}`);
+
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `${window.location.protocol}//${normalized}`;
   }
+
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized);
+  if (window.location.protocol === "https:" && normalized.startsWith("http://") && !isLocal) {
+    normalized = normalized.replace("http://", "https://");
+  }
+
   return normalized;
+}
+
+function buildFetchErrorMessage(error, normalizedBaseUrl) {
+  if (error?.name === "TypeError") {
+    const isHttpsPage = window.location.protocol === "https:";
+    const isHttpBackend = normalizedBaseUrl.startsWith("http://");
+
+    if (isHttpsPage && isHttpBackend) {
+      return "Bloqueo por contenido mixto (HTTPS→HTTP). Usa backend con HTTPS.";
+    }
+
+    if (/localhost|127\.0\.0\.1/.test(normalizedBaseUrl) && !["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+      return "`localhost` desde GitHub Pages apunta a TU computador; ejecuta backend local o usa URL pública.";
+    }
+
+    return "No se pudo conectar al backend (red/CORS/URL).";
+  }
+
+  return error?.message || "Error desconocido de conexión";
+}
+
+async function checkBackendConnection(baseUrl) {
+  const normalized = normalizeApiBaseUrl(baseUrl);
+
+  try {
+    const response = await fetch(`${normalized}/health`, { method: "GET" });
+    if (!response.ok) {
+      throw new Error(`Backend responde ${response.status}`);
+    }
+    return normalized;
+  } catch (error) {
+    throw new Error(buildFetchErrorMessage(error, normalized));
+  }
 }
 
 function formatMusd(value) {
@@ -142,6 +181,7 @@ async function setupDashboard() {
   checkButton.addEventListener("click", async () => {
     try {
       const base = await checkBackendConnection(apiInput.value);
+      apiInput.value = base;
       feedback.textContent = `Conexión OK con backend en ${base}.`;
     } catch (error) {
       feedback.textContent = `Sin conexión backend: ${error.message}`;
@@ -163,9 +203,9 @@ async function setupDashboard() {
     };
 
     try {
-      await checkBackendConnection(baseUrl);
+      const normalizedBaseUrl = await checkBackendConnection(baseUrl);
 
-      const createRes = await fetch(`${baseUrl}/api/v1/opportunities`, {
+      const createRes = await fetch(`${normalizedBaseUrl}/api/v1/opportunities`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -173,13 +213,13 @@ async function setupDashboard() {
       if (!createRes.ok) throw new Error("No se pudo crear la oportunidad.");
       const opp = await createRes.json();
 
-      const simulateRes = await fetch(`${baseUrl}/api/v1/opportunities/${opp.id}/simulate`, {
+      const simulateRes = await fetch(`${normalizedBaseUrl}/api/v1/opportunities/${opp.id}/simulate`, {
         method: "POST",
       });
       if (!simulateRes.ok) throw new Error("No se pudo ejecutar la simulación.");
       const simulation = await simulateRes.json();
 
-      const marketRes = await fetch(`${baseUrl}/api/v1/market/ercot/${encodeURIComponent(opp.ercot_node)}`);
+      const marketRes = await fetch(`${normalizedBaseUrl}/api/v1/market/ercot/${encodeURIComponent(opp.ercot_node)}`);
       if (!marketRes.ok) throw new Error("No se pudo obtener data ERCOT.");
       const market = await marketRes.json();
 
