@@ -56,6 +56,9 @@ try {
   $docs = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$ApiPort/docs"
   if ($docs.Content -notmatch "available_endpoints") { throw "API /docs no responde" }
 
+  $storage = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$ApiPort/api/v1/storage/status"
+  if ($storage.Content -notmatch "designs_v2") { throw "API storage/status no responde" }
+
   Write-Host "[5/5] OK - Desarrollo en acción"
   Write-Host "- Frontend: http://localhost:$StaticPort"
   Write-Host "- API:      http://localhost:$ApiPort/docs"

@@ -4,18 +4,63 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from itertools import product
 import json
+import os
+from pathlib import Path
+import sqlite3
 from typing import Dict, List
 from urllib.parse import urlparse
 from uuid import uuid4
 
-ENGINE_VERSION = "sceni-core-0.3.0"
+ENGINE_VERSION = "sceni-core-0.4.0"
+DB_PATH = os.getenv("SCENI_DB_PATH", str(Path(__file__).resolve().parents[1] / "data" / "sceni.db"))
 
-store = {
-    "opportunities": {},
-    "candidates": {},
-    "snapshots": {},
-    "designs_v2": [],
-}
+
+def db_conn() -> sqlite3.Connection:
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    with db_conn() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS opportunities (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                name TEXT NOT NULL,
+                ercot_node TEXT NOT NULL,
+                horizon_hours INTEGER NOT NULL,
+                demand_mw REAL NOT NULL,
+                poi_limit_mw REAL NOT NULL,
+                solar_capacity_factor REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id TEXT PRIMARY KEY,
+                opportunity_id TEXT NOT NULL,
+                candidate_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                engine_version TEXT NOT NULL,
+                assumptions_json TEXT NOT NULL,
+                architecture_json TEXT NOT NULL,
+                results_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS designs_v2 (
+                snapshot_id TEXT PRIMARY KEY,
+                opportunity_id TEXT NOT NULL,
+                candidate_id TEXT NOT NULL,
+                firm_energy_pct REAL NOT NULL,
+                unserved_mwh REAL NOT NULL,
+                irr_pct REAL NOT NULL,
+                diversity_score REAL NOT NULL,
+                total_score REAL NOT NULL,
+                rank_pos INTEGER NOT NULL
+            );
+            """
+        )
 
 
 def now_iso() -> str:
@@ -102,6 +147,40 @@ def evaluate_candidate(opportunity: Dict, candidate: Dict) -> Dict[str, float]:
     }
 
 
+def get_opportunity(opportunity_id: str) -> Dict | None:
+    with db_conn() as conn:
+        row = conn.execute("SELECT * FROM opportunities WHERE id = ?", (opportunity_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_opportunities() -> List[Dict]:
+    with db_conn() as conn:
+        rows = conn.execute("SELECT * FROM opportunities ORDER BY created_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_opportunity(payload: Dict) -> Dict:
+    opportunity = {
+        "id": str(uuid4()),
+        "created_at": now_iso(),
+        "name": payload["name"],
+        "ercot_node": payload["ercot_node"],
+        "horizon_hours": int(payload.get("horizon_hours", 24)),
+        "demand_mw": float(payload["demand_mw"]),
+        "poi_limit_mw": float(payload["poi_limit_mw"]),
+        "solar_capacity_factor": float(payload.get("solar_capacity_factor", 0.28)),
+    }
+    with db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO opportunities (id, created_at, name, ercot_node, horizon_hours, demand_mw, poi_limit_mw, solar_capacity_factor)
+            VALUES (:id, :created_at, :name, :ercot_node, :horizon_hours, :demand_mw, :poi_limit_mw, :solar_capacity_factor)
+            """,
+            opportunity,
+        )
+    return opportunity
+
+
 def persist_snapshot(opportunity: Dict, candidate: Dict, results: Dict) -> Dict:
     snapshot = {
         "id": str(uuid4()),
@@ -117,8 +196,142 @@ def persist_snapshot(opportunity: Dict, candidate: Dict, results: Dict) -> Dict:
         "architecture": candidate["architecture"],
         "results": results,
     }
-    store["snapshots"][snapshot["id"]] = snapshot
+    with db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO snapshots (id, opportunity_id, candidate_id, created_at, engine_version, assumptions_json, architecture_json, results_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                snapshot["id"],
+                snapshot["opportunity_id"],
+                snapshot["candidate_id"],
+                snapshot["created_at"],
+                snapshot["engine_version"],
+                json.dumps(snapshot["assumptions"]),
+                json.dumps(snapshot["architecture"]),
+                json.dumps(snapshot["results"]),
+            ),
+        )
     return snapshot
+
+
+def run_simulation(opportunity_id: str) -> Dict:
+    opportunity = get_opportunity(opportunity_id)
+    if not opportunity:
+        return {"error": "Opportunity not found", "status": 404}
+
+    candidates = generate_candidates(opportunity)
+    ranked = []
+
+    for candidate in candidates:
+        results = evaluate_candidate(opportunity, candidate)
+        snapshot = persist_snapshot(opportunity, candidate, results)
+        ranked.append(
+            {
+                "snapshot_id": snapshot["id"],
+                "candidate_id": candidate["id"],
+                "firm_energy_pct": results["firm_energy_pct"],
+                "unserved_mwh": results["unserved_mwh"],
+                "irr_pct": results["irr_pct"],
+                "diversity_score": results["diversity_score"],
+                "total_score": results["total_score"],
+                "rank": 0,
+            }
+        )
+
+    ranked.sort(key=lambda x: x["total_score"], reverse=True)
+    for idx, row in enumerate(ranked, start=1):
+        row["rank"] = idx
+
+    with db_conn() as conn:
+        conn.execute("DELETE FROM designs_v2 WHERE opportunity_id = ?", (opportunity_id,))
+        conn.executemany(
+            """
+            INSERT INTO designs_v2 (snapshot_id, opportunity_id, candidate_id, firm_energy_pct, unserved_mwh, irr_pct, diversity_score, total_score, rank_pos)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    d["snapshot_id"],
+                    opportunity_id,
+                    d["candidate_id"],
+                    d["firm_energy_pct"],
+                    d["unserved_mwh"],
+                    d["irr_pct"],
+                    d["diversity_score"],
+                    d["total_score"],
+                    d["rank"],
+                )
+                for d in ranked
+            ],
+        )
+
+    return {
+        "opportunity": opportunity,
+        "candidate_count": len(candidates),
+        "recommended_design": ranked[0],
+        "designs": ranked,
+    }
+
+
+def list_designs(opportunity_id: str) -> List[Dict] | None:
+    if not get_opportunity(opportunity_id):
+        return None
+    with db_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT snapshot_id, candidate_id, firm_energy_pct, unserved_mwh, irr_pct, diversity_score, total_score, rank_pos
+            FROM designs_v2
+            WHERE opportunity_id = ?
+            ORDER BY rank_pos ASC
+            """,
+            (opportunity_id,),
+        ).fetchall()
+    return [
+        {
+            "snapshot_id": r["snapshot_id"],
+            "candidate_id": r["candidate_id"],
+            "firm_energy_pct": r["firm_energy_pct"],
+            "unserved_mwh": r["unserved_mwh"],
+            "irr_pct": r["irr_pct"],
+            "diversity_score": r["diversity_score"],
+            "total_score": r["total_score"],
+            "rank": r["rank_pos"],
+        }
+        for r in rows
+    ]
+
+
+def get_snapshot(snapshot_id: str) -> Dict | None:
+    with db_conn() as conn:
+        row = conn.execute("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,)).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "opportunity_id": row["opportunity_id"],
+        "candidate_id": row["candidate_id"],
+        "created_at": row["created_at"],
+        "engine_version": row["engine_version"],
+        "assumptions": json.loads(row["assumptions_json"]),
+        "architecture": json.loads(row["architecture_json"]),
+        "results": json.loads(row["results_json"]),
+    }
+
+
+def storage_status() -> Dict:
+    with db_conn() as conn:
+        opportunities = conn.execute("SELECT COUNT(*) c FROM opportunities").fetchone()["c"]
+        snapshots = conn.execute("SELECT COUNT(*) c FROM snapshots").fetchone()["c"]
+        designs = conn.execute("SELECT COUNT(*) c FROM designs_v2").fetchone()["c"]
+    return {
+        "db_path": DB_PATH,
+        "opportunities": opportunities,
+        "snapshots": snapshots,
+        "designs_v2": designs,
+        "engine_version": ENGINE_VERSION,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -149,64 +362,48 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
 
         if path == "/":
-            self._send(
-                200,
-                {
-                    "name": "SCENI",
-                    "message": "Decision support system for critical energy infrastructure.",
-                    "status": "ok",
-                    "engine_version": ENGINE_VERSION,
-                },
-            )
+            self._send(200, {"name": "SCENI", "status": "ok", "engine_version": ENGINE_VERSION})
             return
-
         if path == "/health":
             self._send(200, {"status": "healthy"})
             return
-
-        if path == "/api/v1/opportunities":
-            self._send(200, list(store["opportunities"].values()))
+        if path == "/api/v1/storage/status":
+            self._send(200, storage_status())
             return
-
+        if path == "/api/v1/opportunities":
+            self._send(200, list_opportunities())
+            return
         if path.startswith("/api/v1/market/ercot/"):
             node = path.split("/api/v1/market/ercot/")[-1]
             self._send(200, market_for_node(node))
             return
-
         if path.startswith("/api/v1/opportunities/") and path.endswith("/designs"):
             opportunity_id = path.split("/")[4]
-            if opportunity_id not in store["opportunities"]:
+            rows = list_designs(opportunity_id)
+            if rows is None:
                 self._send(404, {"error": "Opportunity not found"})
                 return
-            rows = [d for d in store["designs_v2"] if store["snapshots"][d["snapshot_id"]]["opportunity_id"] == opportunity_id]
             self._send(200, rows)
             return
-
         if path.startswith("/api/v1/snapshots/"):
             snapshot_id = path.split("/api/v1/snapshots/")[-1]
-            snapshot = store["snapshots"].get(snapshot_id)
+            snapshot = get_snapshot(snapshot_id)
             if not snapshot:
                 self._send(404, {"error": "Snapshot not found"})
                 return
             self._send(200, snapshot)
             return
-
         if path == "/docs":
-            self._send(
-                200,
-                {
-                    "available_endpoints": [
-                        "GET /health",
-                        "POST /api/v1/opportunities",
-                        "POST /api/v1/opportunities/{id}/simulate",
-                        "GET /api/v1/opportunities/{id}/designs",
-                        "GET /api/v1/snapshots/{snapshot_id}",
-                        "GET /api/v1/market/ercot/{node}",
-                    ]
-                },
-            )
+            self._send(200, {"available_endpoints": [
+                "GET /health",
+                "GET /api/v1/storage/status",
+                "POST /api/v1/opportunities",
+                "POST /api/v1/opportunities/{id}/simulate",
+                "GET /api/v1/opportunities/{id}/designs",
+                "GET /api/v1/snapshots/{snapshot_id}",
+                "GET /api/v1/market/ercot/{node}",
+            ]})
             return
-
         self._send(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -220,19 +417,7 @@ class Handler(BaseHTTPRequestHandler):
                     if field not in payload:
                         self._send(400, {"error": f"Missing field: {field}"})
                         return
-
-                opportunity = {
-                    "id": str(uuid4()),
-                    "created_at": now_iso(),
-                    "name": payload["name"],
-                    "ercot_node": payload["ercot_node"],
-                    "horizon_hours": int(payload.get("horizon_hours", 24)),
-                    "demand_mw": float(payload["demand_mw"]),
-                    "poi_limit_mw": float(payload["poi_limit_mw"]),
-                    "solar_capacity_factor": float(payload.get("solar_capacity_factor", 0.28)),
-                }
-                store["opportunities"][opportunity["id"]] = opportunity
-                self._send(200, opportunity)
+                self._send(200, create_opportunity(payload))
                 return
             except Exception as exc:
                 self._send(400, {"error": str(exc)})
@@ -240,56 +425,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/v1/opportunities/") and path.endswith("/simulate"):
             opportunity_id = path.split("/")[4]
-            opportunity = store["opportunities"].get(opportunity_id)
-            if not opportunity:
-                self._send(404, {"error": "Opportunity not found"})
+            result = run_simulation(opportunity_id)
+            if result.get("status") == 404:
+                self._send(404, {"error": result["error"]})
                 return
-
-            candidates = generate_candidates(opportunity)
-            for candidate in candidates:
-                store["candidates"][candidate["id"]] = candidate
-
-            ranked = []
-            for candidate in candidates:
-                results = evaluate_candidate(opportunity, candidate)
-                snapshot = persist_snapshot(opportunity, candidate, results)
-                ranked.append(
-                    {
-                        "snapshot_id": snapshot["id"],
-                        "candidate_id": candidate["id"],
-                        "firm_energy_pct": results["firm_energy_pct"],
-                        "unserved_mwh": results["unserved_mwh"],
-                        "irr_pct": results["irr_pct"],
-                        "diversity_score": results["diversity_score"],
-                        "total_score": results["total_score"],
-                        "rank": 0,
-                    }
-                )
-
-            ranked.sort(key=lambda x: x["total_score"], reverse=True)
-            for idx, row in enumerate(ranked, start=1):
-                row["rank"] = idx
-
-            store["designs_v2"] = [d for d in store["designs_v2"] if store["snapshots"][d["snapshot_id"]]["opportunity_id"] != opportunity_id]
-            store["designs_v2"].extend(ranked)
-
-            self._send(
-                200,
-                {
-                    "opportunity": opportunity,
-                    "candidate_count": len(candidates),
-                    "recommended_design": ranked[0],
-                    "designs": ranked,
-                },
-            )
+            self._send(200, result)
             return
 
         self._send(404, {"error": "Not found"})
 
 
 def main():
+    init_db()
     server = HTTPServer(("0.0.0.0", 8000), Handler)
-    print("SCENI backend en http://localhost:8000")
+    print(f"SCENI backend en http://localhost:8000 | DB: {DB_PATH}")
     server.serve_forever()
 
 

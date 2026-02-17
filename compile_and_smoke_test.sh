@@ -45,6 +45,7 @@ done
 curl -fsS "http://127.0.0.1:${API_PORT}/" | rg -q '"status": "ok"'
 curl -fsS "http://127.0.0.1:${API_PORT}/health" | rg -q '"status": "healthy"'
 curl -fsS "http://127.0.0.1:${API_PORT}/docs" | rg -q "available_endpoints"
+curl -fsS "http://127.0.0.1:${API_PORT}/api/v1/storage/status" | rg -q "designs_v2"
 
 echo "[5/5] OK - Desarrollo en acción"
 echo "- Frontend: http://localhost:${STATIC_PORT}"
