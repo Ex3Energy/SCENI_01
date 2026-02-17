@@ -72,6 +72,23 @@ async function checkBackendConnection(baseUrl) {
     }
     return normalized;
   } catch (error) {
+    const canAutoUpgrade =
+      window.location.protocol === "https:" &&
+      normalized.startsWith("http://") &&
+      !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized);
+
+    if (canAutoUpgrade) {
+      const httpsCandidate = normalized.replace("http://", "https://");
+      try {
+        const retryResponse = await fetch(`${httpsCandidate}/health`, { method: "GET" });
+        if (retryResponse.ok) {
+          return httpsCandidate;
+        }
+      } catch {
+        // keep original diagnostic below
+      }
+    }
+
     throw new Error(buildFetchErrorMessage(error, normalized));
   }
 }
@@ -180,9 +197,11 @@ async function setupDashboard() {
 
   checkButton.addEventListener("click", async () => {
     try {
-      const base = await checkBackendConnection(apiInput.value);
+      const previousValue = apiInput.value;
+      const base = await checkBackendConnection(previousValue);
       apiInput.value = base;
-      feedback.textContent = `Conexión OK con backend en ${base}.`;
+      const autoCorrected = normalizeApiBaseUrl(previousValue) !== base;
+      feedback.textContent = `Conexión OK con backend en ${base}.` + (autoCorrected ? " (URL corregida automáticamente)" : "");
     } catch (error) {
       feedback.textContent = `Sin conexión backend: ${error.message}`;
     }
