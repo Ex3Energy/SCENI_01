@@ -1,6 +1,6 @@
 # SCENI_01_NUEVO Backend
 
-Backend HTTP del motor de decisión SCENI con persistencia SQLite.
+Backend HTTP del motor de decisión SCENI con persistencia SQLite cloud-ready e ingesta externa.
 
 ## Ejecutar
 ```bash
@@ -18,4 +18,8 @@ python app/main.py
 - `GET /api/v1/opportunities/{id}/designs`
 - `GET /api/v1/snapshots/{snapshot_id}`
 - `GET /api/v1/market/ercot/{node}`
+- `GET /api/v1/data-sources`
+- `POST /api/v1/data-sources`
+- `POST /api/v1/data-sources/{id}/sync`
+- `GET /api/v1/observations?source_id=<id>`
 - `GET /docs`

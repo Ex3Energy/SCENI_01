@@ -7,12 +7,17 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Dict, List
-from urllib.parse import urlparse
+from typing import Dict, List, Tuple
+from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.request import urlopen
 from uuid import uuid4
 
-ENGINE_VERSION = "sceni-core-0.4.0"
+ENGINE_VERSION = "sceni-core-0.5.0"
 DB_PATH = os.getenv("SCENI_DB_PATH", str(Path(__file__).resolve().parents[1] / "data" / "sceni.db"))
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def db_conn() -> sqlite3.Connection:
@@ -59,12 +64,28 @@ def init_db() -> None:
                 total_score REAL NOT NULL,
                 rank_pos INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS data_sources (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                config_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_sync_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS source_observations (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                metric_key TEXT,
+                metric_value REAL,
+                payload_json TEXT NOT NULL
+            );
             """
         )
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def market_for_node(node: str) -> Dict[str, float | str]:
@@ -320,17 +341,172 @@ def get_snapshot(snapshot_id: str) -> Dict | None:
     }
 
 
+def create_data_source(payload: Dict) -> Dict:
+    row = {
+        "id": str(uuid4()),
+        "name": payload["name"],
+        "source_type": payload["source_type"],
+        "base_url": payload["base_url"],
+        "config_json": json.dumps(payload.get("config", {})),
+        "status": "created",
+        "created_at": now_iso(),
+        "last_sync_at": None,
+    }
+    with db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO data_sources (id, name, source_type, base_url, config_json, status, created_at, last_sync_at)
+            VALUES (:id, :name, :source_type, :base_url, :config_json, :status, :created_at, :last_sync_at)
+            """,
+            row,
+        )
+    row["config"] = json.loads(row["config_json"])
+    del row["config_json"]
+    return row
+
+
+def list_data_sources() -> List[Dict]:
+    with db_conn() as conn:
+        rows = conn.execute("SELECT * FROM data_sources ORDER BY created_at DESC").fetchall()
+    out = []
+    for r in rows:
+        item = dict(r)
+        item["config"] = json.loads(item["config_json"])
+        del item["config_json"]
+        out.append(item)
+    return out
+
+
+def get_data_source(source_id: str) -> Dict | None:
+    with db_conn() as conn:
+        row = conn.execute("SELECT * FROM data_sources WHERE id = ?", (source_id,)).fetchone()
+    if not row:
+        return None
+    data = dict(row)
+    data["config"] = json.loads(data["config_json"])
+    del data["config_json"]
+    return data
+
+
+def fetch_json(url: str, timeout_s: int = 12) -> Dict:
+    with urlopen(url, timeout=timeout_s) as response:
+        body = response.read().decode("utf-8")
+        return json.loads(body)
+
+
+def sync_source(source: Dict) -> Tuple[str, List[Dict]]:
+    source_type = source["source_type"]
+    config = source["config"]
+    observations: List[Dict] = []
+
+    if source_type == "weather_openmeteo":
+        lat = float(config.get("lat", 29.7604))
+        lon = float(config.get("lon", -95.3698))
+        url = f"{source['base_url']}?{urlencode({'latitude': lat, 'longitude': lon, 'current': 'temperature_2m,wind_speed_10m,cloud_cover'})}"
+        payload = fetch_json(url)
+        current = payload.get("current", {})
+        observations.extend(
+            [
+                {"metric_key": "temperature_2m", "metric_value": current.get("temperature_2m"), "payload": payload},
+                {"metric_key": "wind_speed_10m", "metric_value": current.get("wind_speed_10m"), "payload": payload},
+                {"metric_key": "cloud_cover", "metric_value": current.get("cloud_cover"), "payload": payload},
+            ]
+        )
+        return "synced", observations
+
+    if source_type == "ercot_open_data":
+        api_key = config.get("eia_api_key", os.getenv("EIA_API_KEY", "DEMO_KEY"))
+        params = {
+            "api_key": api_key,
+            "frequency": "hourly",
+            "data[0]": "value",
+            "facets[respondent][]": "ERCO",
+            "sort[0][column]": "period",
+            "sort[0][direction]": "desc",
+            "offset": 0,
+            "length": 3,
+        }
+        url = f"{source['base_url']}?{urlencode(params)}"
+        payload = fetch_json(url)
+        data = payload.get("response", {}).get("data", [])
+        for item in data:
+            observations.append(
+                {
+                    "metric_key": "ercot_open_value",
+                    "metric_value": float(item.get("value", 0) or 0),
+                    "payload": item,
+                }
+            )
+        return "synced", observations
+
+    return "unsupported_source_type", observations
+
+
+def persist_observations(source_id: str, observations: List[Dict]) -> None:
+    if not observations:
+        return
+    with db_conn() as conn:
+        conn.executemany(
+            """
+            INSERT INTO source_observations (id, source_id, observed_at, metric_key, metric_value, payload_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    str(uuid4()),
+                    source_id,
+                    now_iso(),
+                    obs.get("metric_key"),
+                    obs.get("metric_value"),
+                    json.dumps(obs.get("payload", {})),
+                )
+                for obs in observations
+            ],
+        )
+
+
+def list_observations(source_id: str | None = None, limit: int = 50) -> List[Dict]:
+    with db_conn() as conn:
+        if source_id:
+            rows = conn.execute(
+                """
+                SELECT * FROM source_observations
+                WHERE source_id = ?
+                ORDER BY observed_at DESC
+                LIMIT ?
+                """,
+                (source_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM source_observations ORDER BY observed_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    out = []
+    for r in rows:
+        row = dict(r)
+        row["payload"] = json.loads(row["payload_json"])
+        del row["payload_json"]
+        out.append(row)
+    return out
+
+
 def storage_status() -> Dict:
     with db_conn() as conn:
         opportunities = conn.execute("SELECT COUNT(*) c FROM opportunities").fetchone()["c"]
         snapshots = conn.execute("SELECT COUNT(*) c FROM snapshots").fetchone()["c"]
         designs = conn.execute("SELECT COUNT(*) c FROM designs_v2").fetchone()["c"]
+        sources = conn.execute("SELECT COUNT(*) c FROM data_sources").fetchone()["c"]
+        observations = conn.execute("SELECT COUNT(*) c FROM source_observations").fetchone()["c"]
     return {
         "db_path": DB_PATH,
         "opportunities": opportunities,
         "snapshots": snapshots,
         "designs_v2": designs,
+        "data_sources": sources,
+        "source_observations": observations,
         "engine_version": ENGINE_VERSION,
+        "cloud_ready": True,
     }
 
 
@@ -359,7 +535,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
 
         if path == "/":
             self._send(200, {"name": "SCENI", "status": "ok", "engine_version": ENGINE_VERSION})
@@ -372,6 +550,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/v1/opportunities":
             self._send(200, list_opportunities())
+            return
+        if path == "/api/v1/data-sources":
+            self._send(200, list_data_sources())
+            return
+        if path == "/api/v1/observations":
+            source_id = query.get("source_id", [None])[0]
+            limit = int(query.get("limit", ["50"])[0])
+            self._send(200, list_observations(source_id=source_id, limit=limit))
             return
         if path.startswith("/api/v1/market/ercot/"):
             node = path.split("/api/v1/market/ercot/")[-1]
@@ -394,16 +580,26 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, snapshot)
             return
         if path == "/docs":
-            self._send(200, {"available_endpoints": [
-                "GET /health",
-                "GET /api/v1/storage/status",
-                "POST /api/v1/opportunities",
-                "POST /api/v1/opportunities/{id}/simulate",
-                "GET /api/v1/opportunities/{id}/designs",
-                "GET /api/v1/snapshots/{snapshot_id}",
-                "GET /api/v1/market/ercot/{node}",
-            ]})
+            self._send(
+                200,
+                {
+                    "available_endpoints": [
+                        "GET /health",
+                        "GET /api/v1/storage/status",
+                        "POST /api/v1/opportunities",
+                        "POST /api/v1/opportunities/{id}/simulate",
+                        "GET /api/v1/opportunities/{id}/designs",
+                        "GET /api/v1/snapshots/{snapshot_id}",
+                        "GET /api/v1/market/ercot/{node}",
+                        "GET /api/v1/data-sources",
+                        "POST /api/v1/data-sources",
+                        "POST /api/v1/data-sources/{id}/sync",
+                        "GET /api/v1/observations?source_id=<id>",
+                    ]
+                },
+            )
             return
+
         self._send(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -431,6 +627,54 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, result)
             return
+
+        if path == "/api/v1/data-sources":
+            try:
+                payload = self._parse_json()
+                required = ["name", "source_type", "base_url"]
+                for field in required:
+                    if field not in payload:
+                        self._send(400, {"error": f"Missing field: {field}"})
+                        return
+                self._send(200, create_data_source(payload))
+                return
+            except Exception as exc:
+                self._send(400, {"error": str(exc)})
+                return
+
+        if path.startswith("/api/v1/data-sources/") and path.endswith("/sync"):
+            source_id = path.split("/")[4]
+            source = get_data_source(source_id)
+            if not source:
+                self._send(404, {"error": "Data source not found"})
+                return
+
+            try:
+                status, observations = sync_source(source)
+                persist_observations(source_id, observations)
+                with db_conn() as conn:
+                    conn.execute(
+                        "UPDATE data_sources SET status = ?, last_sync_at = ? WHERE id = ?",
+                        (status, now_iso(), source_id),
+                    )
+                self._send(
+                    200,
+                    {
+                        "source_id": source_id,
+                        "status": status,
+                        "ingested": len(observations),
+                        "preview": observations[:2],
+                    },
+                )
+                return
+            except Exception as exc:
+                with db_conn() as conn:
+                    conn.execute(
+                        "UPDATE data_sources SET status = ?, last_sync_at = ? WHERE id = ?",
+                        (f"error: {exc}", now_iso(), source_id),
+                    )
+                self._send(502, {"error": f"Source sync failed: {exc}"})
+                return
 
         self._send(404, {"error": "Not found"})
 
