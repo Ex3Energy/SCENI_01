@@ -18,10 +18,29 @@ const resilienceFactor = {
 };
 
 
-function getDefaultApiBaseUrl() {
-  if (window.location.hostname.includes("github.io")) {
-    return "";
+const DEMO_CLOUD_BACKEND = "https://sceni-backend.onrender.com";
+
+function getApiBaseFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("api_base") || "";
+}
+
+function getInitialApiBaseUrl() {
+  const queryValue = getApiBaseFromQuery();
+  const savedValue = localStorage.getItem("sceni_api_base_url") || "";
+
+  if (queryValue) {
+    return queryValue;
   }
+
+  if (savedValue) {
+    return savedValue;
+  }
+
+  if (window.location.hostname.includes("github.io")) {
+    return DEMO_CLOUD_BACKEND;
+  }
+
   return "http://localhost:8000";
 }
 
@@ -54,7 +73,8 @@ function normalizeApiBaseUrl(baseUrl) {
   const backendIsLocal = isLocalHost(url.hostname);
 
   if (frontendIsHosted && backendIsLocal) {
-    throw new Error("`localhost` desde GitHub Pages apunta a TU computador; usa URL pública HTTPS.");
+    // auto-corrige a backend cloud por defecto en entorno publicado
+    url = new URL(DEMO_CLOUD_BACKEND);
   }
 
   if (frontendProtocol === "https:" && url.protocol === "http:" && !backendIsLocal) {
@@ -198,14 +218,26 @@ async function setupDashboard() {
   const form = document.getElementById("opportunity-form");
   const feedback = document.getElementById("dashboard-feedback");
   const checkButton = document.getElementById("check-backend");
+  const useCloudButton = document.getElementById("use-cloud-backend");
   const apiInput = form.querySelector('input[name="apiBaseUrl"]');
-  apiInput.value = getDefaultApiBaseUrl();
+  apiInput.value = getInitialApiBaseUrl();
+
+  apiInput.addEventListener("change", () => {
+    localStorage.setItem("sceni_api_base_url", apiInput.value.trim());
+  });
+
+  useCloudButton.addEventListener("click", () => {
+    apiInput.value = DEMO_CLOUD_BACKEND;
+    localStorage.setItem("sceni_api_base_url", apiInput.value);
+    feedback.textContent = `Backend configurado a ${DEMO_CLOUD_BACKEND}`;
+  });
 
   checkButton.addEventListener("click", async () => {
     try {
       const previousValue = apiInput.value;
       const base = await checkBackendConnection(previousValue);
       apiInput.value = base;
+      localStorage.setItem("sceni_api_base_url", base);
       let autoCorrected = false;
       try {
         autoCorrected = normalizeApiBaseUrl(previousValue) !== base;
@@ -234,6 +266,7 @@ async function setupDashboard() {
 
     try {
       const normalizedBaseUrl = await checkBackendConnection(baseUrl);
+      localStorage.setItem("sceni_api_base_url", normalizedBaseUrl);
 
       const createRes = await fetch(`${normalizedBaseUrl}/api/v1/opportunities`, {
         method: "POST",
@@ -257,7 +290,7 @@ async function setupDashboard() {
       renderDashboardSummary(simulation, market);
       feedback.textContent = `Simulación lista para ${opp.name}.`; 
     } catch (error) {
-      feedback.textContent = `Error: ${error.message}. Si usas GitHub Pages, localhost no funciona en la nube; ejecuta backend local o usa una URL pública.`;
+      feedback.textContent = `Error: ${error.message}. Puedes usar el botón "Usar backend cloud demo".`;
     }
   });
 }

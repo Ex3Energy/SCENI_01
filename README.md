@@ -88,3 +88,4 @@ powershell -ExecutionPolicy Bypass -File .\compile_and_smoke_test.ps1
 - En frontend publicado (GitHub Pages), **API Base URL debe ser HTTPS pública** (ej. `https://sceni-backend.onrender.com`).
 - Si abres la UI desde GitHub Pages, `localhost` apunta a tu computador local, no al backend en la nube.
 - Si persiste el error, prueba `https://<tu-backend>/health` en navegador.
+- Puedes forzar backend demo cloud con el botón **Usar backend cloud demo** (apunta a `https://sceni-backend.onrender.com`).
