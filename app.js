@@ -85,6 +85,45 @@ function normalizeApiBaseUrl(baseUrl) {
   return url.toString().replace(/\/$/, "");
 }
 
+
+async function fetchWithTimeout(url, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { method: "GET", signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function probeBackendHealth(baseUrl) {
+  const healthUrl = `${baseUrl}/health`;
+  const rootUrl = `${baseUrl}/`;
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const healthResp = await fetchWithTimeout(healthUrl, 25000);
+      if (healthResp.ok) return baseUrl;
+      lastError = new Error(`Backend responde ${healthResp.status} en /health`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    try {
+      const rootResp = await fetchWithTimeout(rootUrl, 25000);
+      if (rootResp.ok) return baseUrl;
+      lastError = new Error(`Backend responde ${rootResp.status} en /`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+  }
+
+  throw lastError || new Error("No fue posible contactar backend");
+}
+
 function buildFetchErrorMessage(error, normalizedBaseUrl) {
   const isHttpsPage = window.location.protocol === "https:";
   const isHttpBackend = /^http:\/\//i.test(normalizedBaseUrl);
@@ -97,25 +136,20 @@ function buildFetchErrorMessage(error, normalizedBaseUrl) {
     return "Bloqueo por contenido mixto (HTTPS→HTTP). Usa backend con HTTPS.";
   }
 
+  if (String(error?.message || "").includes("Failed to fetch")) {
+    return "Failed to fetch: backend caído, URL incorrecta o CORS/bloqueo de red. Si usas Render free, espera 30-60s por cold start y reintenta.";
+  }
+
   return error?.message || "No se pudo conectar al backend (red/CORS/URL).";
 }
 
 async function checkBackendConnection(baseUrl) {
   const normalized = normalizeApiBaseUrl(baseUrl);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-
   try {
-    const response = await fetch(`${normalized}/health`, { method: "GET", signal: controller.signal });
-    if (!response.ok) {
-      throw new Error(`Backend responde ${response.status}`);
-    }
-    return normalized;
+    return await probeBackendHealth(normalized);
   } catch (error) {
     throw new Error(buildFetchErrorMessage(error, normalized));
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -233,6 +267,7 @@ async function setupDashboard() {
   });
 
   checkButton.addEventListener("click", async () => {
+    feedback.textContent = "Validando conexión con backend (puede tardar por cold start)...";
     try {
       const previousValue = apiInput.value;
       const base = await checkBackendConnection(previousValue);
