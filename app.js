@@ -248,6 +248,83 @@ function renderDashboardSummary(simulation, market) {
   `;
 }
 
+
+function buildLocalMarket(node) {
+  const seed = String(node || "HB_HOUSTON").toUpperCase().split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  const base = 42 + (seed % 18);
+  return {
+    node: String(node || "HB_HOUSTON").toUpperCase(),
+    avg_price_usd_mwh: Number(base.toFixed(2)),
+    volatility_pct: Number((18 + (seed % 14)).toFixed(2)),
+    peak_price_usd_mwh: Number((base * 1.85).toFixed(2)),
+  };
+}
+
+function buildLocalSimulation(payload) {
+  const demand = Number(payload.demand_mw);
+  const horizon = Number(payload.horizon_hours);
+  const poi = Number(payload.poi_limit_mw);
+
+  const gridShares = [0.35, 0.5, 0.7];
+  const solarRatios = [0.5, 0.8, 1.1];
+  const gasRatios = [0.15, 0.3];
+
+  const designs = [];
+  let rank = 0;
+
+  for (const g of gridShares) {
+    for (const s of solarRatios) {
+      for (const gas of gasRatios) {
+        const gridMw = Math.min(poi, demand * g);
+        const solarMw = demand * s;
+        const gasMw = demand * gas;
+        const bessMwh = demand * 0.35 * 4;
+
+        const demandMwh = demand * horizon;
+        const served = Math.min(
+          demandMwh,
+          gridMw * horizon + solarMw * 0.28 * horizon + gasMw * horizon * 0.5 + bessMwh * 0.92
+        );
+
+        const unserved = Math.max(0, demandMwh - served);
+        const firm = (served / demandMwh) * 100;
+        const irr = Math.max(-4, Math.min(26, firm / 6.5 + (gasMw / Math.max(demand, 1)) * 6 - (solarMw / 120) * 0.5));
+        const score = firm * 0.45 + (100 - (unserved / demandMwh) * 180) * 0.3 + (irr + 5) * 0.44 + 5;
+
+        designs.push({
+          snapshot_id: crypto.randomUUID(),
+          candidate_id: crypto.randomUUID(),
+          firm_energy_pct: Number(firm.toFixed(2)),
+          unserved_mwh: Number(unserved.toFixed(2)),
+          irr_pct: Number(irr.toFixed(2)),
+          diversity_score: 100,
+          total_score: Number(score.toFixed(2)),
+          rank: 0,
+        });
+      }
+    }
+  }
+
+  designs.sort((a, b) => b.total_score - a.total_score).forEach((d) => {
+    rank += 1;
+    d.rank = rank;
+  });
+
+  return {
+    opportunity: {
+      id: crypto.randomUUID(),
+      name: payload.name,
+      ercot_node: payload.ercot_node,
+      horizon_hours: horizon,
+      demand_mw: demand,
+      poi_limit_mw: poi,
+    },
+    candidate_count: designs.length,
+    recommended_design: designs[0],
+    designs,
+  };
+}
+
 async function setupDashboard() {
   const form = document.getElementById("opportunity-form");
   const feedback = document.getElementById("dashboard-feedback");
@@ -325,7 +402,11 @@ async function setupDashboard() {
       renderDashboardSummary(simulation, market);
       feedback.textContent = `Simulación lista para ${opp.name}.`; 
     } catch (error) {
-      feedback.textContent = `Error: ${error.message}. Puedes usar el botón "Usar backend cloud demo".`;
+      const simulation = buildLocalSimulation(payload);
+      const market = buildLocalMarket(payload.ercot_node);
+      renderDesignTable(simulation.designs);
+      renderDashboardSummary(simulation, market);
+      feedback.textContent = `Backend no disponible (${error.message}). Ejecutado en modo local de contingencia.`;
     }
   });
 }
