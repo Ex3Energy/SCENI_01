@@ -588,6 +588,144 @@ def run_demo_ingestion(node: str = "HB_HOUSTON") -> Dict:
     }
 
 
+def register_default_sources() -> Dict:
+    defaults = [
+        {
+            "name": "OpenMeteo Houston",
+            "source_type": "weather_openmeteo",
+            "base_url": "https://api.open-meteo.com/v1/forecast",
+            "config": {"lat": 29.7604, "lon": -95.3698},
+        },
+        {
+            "name": "ERCOT EIA",
+            "source_type": "ercot_open_data",
+            "base_url": "https://api.eia.gov/v2/electricity/rto/region-data/data",
+            "config": {"eia_api_key": os.getenv("EIA_API_KEY", "DEMO_KEY")},
+        },
+    ]
+
+    created = 0
+    reused = 0
+    rows = []
+    with db_conn() as conn:
+        for src in defaults:
+            existing = conn.execute(
+                "SELECT id, name, source_type, base_url, config_json, status, created_at, last_sync_at FROM data_sources WHERE source_type = ? AND base_url = ? LIMIT 1",
+                (src["source_type"], src["base_url"]),
+            ).fetchone()
+            if existing:
+                reused += 1
+                rows.append(dict(existing))
+                continue
+
+            row = {
+                "id": str(uuid4()),
+                "name": src["name"],
+                "source_type": src["source_type"],
+                "base_url": src["base_url"],
+                "config_json": json.dumps(src["config"]),
+                "status": "created",
+                "created_at": now_iso(),
+                "last_sync_at": None,
+            }
+            conn.execute(
+                """
+                INSERT INTO data_sources (id, name, source_type, base_url, config_json, status, created_at, last_sync_at)
+                VALUES (:id, :name, :source_type, :base_url, :config_json, :status, :created_at, :last_sync_at)
+                """,
+                row,
+            )
+            created += 1
+            rows.append(row)
+
+    out = []
+    for r in rows:
+        item = dict(r)
+        item["config"] = json.loads(item["config_json"])
+        del item["config_json"]
+        out.append(item)
+
+    return {"created": created, "reused": reused, "sources": out}
+
+
+def run_all_source_syncs() -> Dict:
+    sources = list_data_sources()
+    results = []
+    synced = 0
+    failed = 0
+
+    for source in sources:
+        try:
+            status, observations = sync_source(source)
+            persist_observations(source["id"], observations)
+            with db_conn() as conn:
+                conn.execute(
+                    "UPDATE data_sources SET status = ?, last_sync_at = ? WHERE id = ?",
+                    (status, now_iso(), source["id"]),
+                )
+            results.append({"source_id": source["id"], "status": status, "ingested": len(observations)})
+            synced += 1
+        except Exception as exc:
+            with db_conn() as conn:
+                conn.execute(
+                    "UPDATE data_sources SET status = ?, last_sync_at = ? WHERE id = ?",
+                    (f"error: {exc}", now_iso(), source["id"]),
+                )
+            results.append({"source_id": source["id"], "status": "error", "error": str(exc), "ingested": 0})
+            failed += 1
+
+    with db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO ingestion_runs (id, run_type, status, details_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid4()),
+                "sync_all_sources",
+                "ok" if failed == 0 else "partial",
+                json.dumps({"total": len(sources), "synced": synced, "failed": failed}),
+                now_iso(),
+            ),
+        )
+
+    return {"total_sources": len(sources), "synced": synced, "failed": failed, "results": results}
+
+
+def _latest_table_time(table: str) -> str | None:
+    query = f"SELECT MAX(observed_at) AS ts FROM {table}"
+    with db_conn() as conn:
+        row = conn.execute(query).fetchone()
+    return row["ts"] if row else None
+
+
+def data_quality_status(max_age_minutes: int = 120) -> Dict:
+    now = datetime.now(timezone.utc)
+
+    def freshness(ts: str | None) -> Dict:
+        if not ts:
+            return {"state": "missing", "age_minutes": None}
+        observed = datetime.fromisoformat(ts)
+        age_min = (now - observed).total_seconds() / 60
+        state = "fresh" if age_min <= max_age_minutes else "stale"
+        return {"state": state, "age_minutes": round(age_min, 2), "observed_at": ts}
+
+    sources = list_data_sources()
+    latest_obs = _latest_table_time("source_observations")
+    latest_constraints = _latest_table_time("grid_constraints")
+    latest_prices = _latest_table_time("market_prices")
+    latest_weather = _latest_table_time("weather_samples")
+
+    return {
+        "max_age_minutes": max_age_minutes,
+        "source_count": len(sources),
+        "last_observation": freshness(latest_obs),
+        "grid_constraints": freshness(latest_constraints),
+        "market_prices": freshness(latest_prices),
+        "weather_samples": freshness(latest_weather),
+    }
+
+
 def list_data_sources() -> List[Dict]:
     with db_conn() as conn:
         rows = conn.execute("SELECT * FROM data_sources ORDER BY created_at DESC").fetchall()
@@ -788,6 +926,10 @@ class Handler(BaseHTTPRequestHandler):
             limit = int(query.get("limit", ["50"])[0])
             self._send(200, list_observations(source_id=source_id, limit=limit))
             return
+        if path == "/api/v1/data-quality/status":
+            max_age = int(query.get("max_age_minutes", ["120"])[0])
+            self._send(200, data_quality_status(max_age_minutes=max_age))
+            return
         if path == "/api/v1/network/constraints":
             node = query.get("node", [None])[0]
             limit = int(query.get("limit", ["100"])[0])
@@ -839,10 +981,13 @@ class Handler(BaseHTTPRequestHandler):
                         "POST /api/v1/data-sources",
                         "POST /api/v1/data-sources/{id}/sync",
                         "GET /api/v1/observations?source_id=<id>",
+                        "GET /api/v1/data-quality/status",
                         "GET /api/v1/network/constraints?node=HB_HOUSTON",
                         "GET /api/v1/market/prices?node=HB_HOUSTON",
                         "GET /api/v1/weather?node=HB_HOUSTON",
                         "POST /api/v1/ingestion/bootstrap-demo",
+                        "POST /api/v1/ingestion/register-default-sources",
+                        "POST /api/v1/ingestion/run-all",
                     ]
                 },
             )
@@ -933,6 +1078,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._send(400, {"error": str(exc)})
                 return
+
+        if path == "/api/v1/ingestion/register-default-sources":
+            self._send(200, register_default_sources())
+            return
+
+        if path == "/api/v1/ingestion/run-all":
+            self._send(200, run_all_source_syncs())
+            return
 
         self._send(404, {"error": "Not found"})
 

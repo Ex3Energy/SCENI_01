@@ -97,6 +97,27 @@ curl "http://localhost:8000/api/v1/market/prices?node=HB_HOUSTON&limit=10"
 curl "http://localhost:8000/api/v1/weather?node=HB_HOUSTON&limit=10"
 ```
 
+
+## Pasos sugeridos (ejecución inmediata)
+1. Registrar fuentes por defecto:
+```bash
+curl -X POST http://localhost:8000/api/v1/ingestion/register-default-sources
+```
+2. Ejecutar sincronización completa:
+```bash
+curl -X POST http://localhost:8000/api/v1/ingestion/run-all
+```
+3. Revisar estado de calidad y frescura de datos:
+```bash
+curl "http://localhost:8000/api/v1/data-quality/status?max_age_minutes=120"
+```
+4. Consultar datasets integrados por nodo:
+```bash
+curl "http://localhost:8000/api/v1/network/constraints?node=HB_HOUSTON&limit=10"
+curl "http://localhost:8000/api/v1/market/prices?node=HB_HOUSTON&limit=10"
+curl "http://localhost:8000/api/v1/weather?node=HB_HOUSTON&limit=10"
+```
+
 ## Smoke test completo
 ```bash
 ./compile_and_smoke_test.sh
