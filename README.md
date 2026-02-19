@@ -75,6 +75,28 @@ curl -X POST http://localhost:8000/api/v1/data-sources/<SOURCE_ID>/sync
 curl "http://localhost:8000/api/v1/observations?source_id=<SOURCE_ID>&limit=20"
 ```
 
+
+## Arquitectura objetivo (Frontend + Backend + Data)
+- Revisa el blueprint detallado: `docs/SCENI_ARCHITECTURE_BLUEPRINT.md`.
+- Incluye arquitectura de referencia para SaaS energético, modelo de datos cloud y roadmap de integración ERCOT + clima + restricciones de red.
+
+## Nuevos endpoints de datos energéticos
+- `POST /api/v1/ingestion/bootstrap-demo` (inyecta dataset inicial de restricciones/precios/clima por nodo).
+- `GET /api/v1/network/constraints?node=HB_HOUSTON`
+- `GET /api/v1/market/prices?node=HB_HOUSTON`
+- `GET /api/v1/weather?node=HB_HOUSTON`
+
+Ejemplo rápido:
+```bash
+curl -X POST http://localhost:8000/api/v1/ingestion/bootstrap-demo \
+  -H "Content-Type: application/json" \
+  -d '{"node": "HB_HOUSTON"}'
+
+curl "http://localhost:8000/api/v1/network/constraints?node=HB_HOUSTON&limit=10"
+curl "http://localhost:8000/api/v1/market/prices?node=HB_HOUSTON&limit=10"
+curl "http://localhost:8000/api/v1/weather?node=HB_HOUSTON&limit=10"
+```
+
 ## Smoke test completo
 ```bash
 ./compile_and_smoke_test.sh

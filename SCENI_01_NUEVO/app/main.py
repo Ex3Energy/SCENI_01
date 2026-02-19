@@ -84,11 +84,57 @@ def init_db() -> None:
                 metric_value REAL,
                 payload_json TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS grid_constraints (
+                id TEXT PRIMARY KEY,
+                node TEXT NOT NULL,
+                constraint_type TEXT NOT NULL,
+                limit_mw REAL,
+                status TEXT NOT NULL,
+                source TEXT NOT NULL,
+                observed_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS market_prices (
+                id TEXT PRIMARY KEY,
+                node TEXT NOT NULL,
+                price_usd_mwh REAL NOT NULL,
+                volatility_pct REAL,
+                source TEXT NOT NULL,
+                observed_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS weather_samples (
+                id TEXT PRIMARY KEY,
+                node TEXT NOT NULL,
+                temperature_c REAL,
+                wind_speed_ms REAL,
+                cloud_cover_pct REAL,
+                source TEXT NOT NULL,
+                observed_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ingestion_runs (
+                id TEXT PRIMARY KEY,
+                run_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                details_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
 
 
 def market_for_node(node: str) -> Dict[str, float | str]:
+    latest = latest_market_price(node)
+    if latest:
+        return {
+            "node": node.upper(),
+            "avg_price_usd_mwh": round(float(latest["price_usd_mwh"]), 2),
+            "volatility_pct": round(float(latest["volatility_pct"] or 20.0), 2),
+            "peak_price_usd_mwh": round(float(latest["price_usd_mwh"]) * 1.85, 2),
+        }
+
     seed = sum(ord(ch) for ch in node.upper())
     base = 42 + (seed % 28)
     vol = 18 + (seed % 17)
@@ -365,6 +411,183 @@ def create_data_source(payload: Dict) -> Dict:
     return row
 
 
+def latest_market_price(node: str) -> Dict | None:
+    with db_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT node, price_usd_mwh, volatility_pct, observed_at
+            FROM market_prices
+            WHERE UPPER(node) = UPPER(?)
+            ORDER BY observed_at DESC
+            LIMIT 1
+            """,
+            (node,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_grid_constraints(node: str | None = None, limit: int = 100) -> List[Dict]:
+    with db_conn() as conn:
+        if node:
+            rows = conn.execute(
+                """
+                SELECT * FROM grid_constraints
+                WHERE UPPER(node) = UPPER(?)
+                ORDER BY observed_at DESC
+                LIMIT ?
+                """,
+                (node, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM grid_constraints ORDER BY observed_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_market_prices(node: str | None = None, limit: int = 100) -> List[Dict]:
+    with db_conn() as conn:
+        if node:
+            rows = conn.execute(
+                """
+                SELECT * FROM market_prices
+                WHERE UPPER(node) = UPPER(?)
+                ORDER BY observed_at DESC
+                LIMIT ?
+                """,
+                (node, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM market_prices ORDER BY observed_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_weather_samples(node: str | None = None, limit: int = 100) -> List[Dict]:
+    with db_conn() as conn:
+        if node:
+            rows = conn.execute(
+                """
+                SELECT * FROM weather_samples
+                WHERE UPPER(node) = UPPER(?)
+                ORDER BY observed_at DESC
+                LIMIT ?
+                """,
+                (node, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM weather_samples ORDER BY observed_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def run_demo_ingestion(node: str = "HB_HOUSTON") -> Dict:
+    now = now_iso()
+    upper_node = node.upper()
+    seed = sum(ord(ch) for ch in upper_node)
+    price = 48 + (seed % 20)
+    vol = 22 + (seed % 12)
+    temp = 27 + (seed % 6)
+    wind = 5 + (seed % 4)
+    cloud = 35 + (seed % 30)
+
+    constraints = [
+        {
+            "id": str(uuid4()),
+            "node": upper_node,
+            "constraint_type": "POI_IMPORT_LIMIT",
+            "limit_mw": 45 + (seed % 8),
+            "status": "active",
+            "source": "ercot_open_data_demo",
+            "observed_at": now,
+        },
+        {
+            "id": str(uuid4()),
+            "node": upper_node,
+            "constraint_type": "N-1_SECURITY_MARGIN",
+            "limit_mw": 38 + (seed % 7),
+            "status": "active",
+            "source": "ercot_open_data_demo",
+            "observed_at": now,
+        },
+    ]
+
+    market_rows = [
+        {
+            "id": str(uuid4()),
+            "node": upper_node,
+            "price_usd_mwh": round(price, 2),
+            "volatility_pct": round(vol, 2),
+            "source": "ercot_open_data_demo",
+            "observed_at": now,
+        }
+    ]
+
+    weather_rows = [
+        {
+            "id": str(uuid4()),
+            "node": upper_node,
+            "temperature_c": round(temp, 2),
+            "wind_speed_ms": round(wind, 2),
+            "cloud_cover_pct": round(cloud, 2),
+            "source": "open_meteo_demo",
+            "observed_at": now,
+        }
+    ]
+
+    run_id = str(uuid4())
+    with db_conn() as conn:
+        conn.executemany(
+            """
+            INSERT INTO grid_constraints (id, node, constraint_type, limit_mw, status, source, observed_at)
+            VALUES (:id, :node, :constraint_type, :limit_mw, :status, :source, :observed_at)
+            """,
+            constraints,
+        )
+        conn.executemany(
+            """
+            INSERT INTO market_prices (id, node, price_usd_mwh, volatility_pct, source, observed_at)
+            VALUES (:id, :node, :price_usd_mwh, :volatility_pct, :source, :observed_at)
+            """,
+            market_rows,
+        )
+        conn.executemany(
+            """
+            INSERT INTO weather_samples (id, node, temperature_c, wind_speed_ms, cloud_cover_pct, source, observed_at)
+            VALUES (:id, :node, :temperature_c, :wind_speed_ms, :cloud_cover_pct, :source, :observed_at)
+            """,
+            weather_rows,
+        )
+        conn.execute(
+            """
+            INSERT INTO ingestion_runs (id, run_type, status, details_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                "bootstrap_demo",
+                "ok",
+                json.dumps({"node": upper_node, "constraints": len(constraints), "prices": len(market_rows), "weather": len(weather_rows)}),
+                now,
+            ),
+        )
+
+    return {
+        "run_id": run_id,
+        "node": upper_node,
+        "ingested": {
+            "grid_constraints": len(constraints),
+            "market_prices": len(market_rows),
+            "weather_samples": len(weather_rows),
+        },
+    }
+
+
 def list_data_sources() -> List[Dict]:
     with db_conn() as conn:
         rows = conn.execute("SELECT * FROM data_sources ORDER BY created_at DESC").fetchall()
@@ -498,6 +721,9 @@ def storage_status() -> Dict:
         designs = conn.execute("SELECT COUNT(*) c FROM designs_v2").fetchone()["c"]
         sources = conn.execute("SELECT COUNT(*) c FROM data_sources").fetchone()["c"]
         observations = conn.execute("SELECT COUNT(*) c FROM source_observations").fetchone()["c"]
+        constraints = conn.execute("SELECT COUNT(*) c FROM grid_constraints").fetchone()["c"]
+        prices = conn.execute("SELECT COUNT(*) c FROM market_prices").fetchone()["c"]
+        weather = conn.execute("SELECT COUNT(*) c FROM weather_samples").fetchone()["c"]
     return {
         "db_path": DB_PATH,
         "opportunities": opportunities,
@@ -505,6 +731,9 @@ def storage_status() -> Dict:
         "designs_v2": designs,
         "data_sources": sources,
         "source_observations": observations,
+        "grid_constraints": constraints,
+        "market_prices": prices,
+        "weather_samples": weather,
         "engine_version": ENGINE_VERSION,
         "cloud_ready": True,
     }
@@ -559,6 +788,21 @@ class Handler(BaseHTTPRequestHandler):
             limit = int(query.get("limit", ["50"])[0])
             self._send(200, list_observations(source_id=source_id, limit=limit))
             return
+        if path == "/api/v1/network/constraints":
+            node = query.get("node", [None])[0]
+            limit = int(query.get("limit", ["100"])[0])
+            self._send(200, list_grid_constraints(node=node, limit=limit))
+            return
+        if path == "/api/v1/market/prices":
+            node = query.get("node", [None])[0]
+            limit = int(query.get("limit", ["100"])[0])
+            self._send(200, list_market_prices(node=node, limit=limit))
+            return
+        if path == "/api/v1/weather":
+            node = query.get("node", [None])[0]
+            limit = int(query.get("limit", ["100"])[0])
+            self._send(200, list_weather_samples(node=node, limit=limit))
+            return
         if path.startswith("/api/v1/market/ercot/"):
             node = path.split("/api/v1/market/ercot/")[-1]
             self._send(200, market_for_node(node))
@@ -595,6 +839,10 @@ class Handler(BaseHTTPRequestHandler):
                         "POST /api/v1/data-sources",
                         "POST /api/v1/data-sources/{id}/sync",
                         "GET /api/v1/observations?source_id=<id>",
+                        "GET /api/v1/network/constraints?node=HB_HOUSTON",
+                        "GET /api/v1/market/prices?node=HB_HOUSTON",
+                        "GET /api/v1/weather?node=HB_HOUSTON",
+                        "POST /api/v1/ingestion/bootstrap-demo",
                     ]
                 },
             )
@@ -674,6 +922,16 @@ class Handler(BaseHTTPRequestHandler):
                         (f"error: {exc}", now_iso(), source_id),
                     )
                 self._send(502, {"error": f"Source sync failed: {exc}"})
+                return
+
+        if path == "/api/v1/ingestion/bootstrap-demo":
+            try:
+                payload = self._parse_json()
+                node = payload.get("node", "HB_HOUSTON")
+                self._send(200, run_demo_ingestion(node=node))
+                return
+            except Exception as exc:
+                self._send(400, {"error": str(exc)})
                 return
 
         self._send(404, {"error": "Not found"})

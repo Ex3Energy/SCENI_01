@@ -22,4 +22,12 @@ python app/main.py
 - `POST /api/v1/data-sources`
 - `POST /api/v1/data-sources/{id}/sync`
 - `GET /api/v1/observations?source_id=<id>`
+- `POST /api/v1/ingestion/bootstrap-demo`
+- `GET /api/v1/network/constraints?node=HB_HOUSTON`
+- `GET /api/v1/market/prices?node=HB_HOUSTON`
+- `GET /api/v1/weather?node=HB_HOUSTON`
 - `GET /docs`
+
+
+## Arquitectura objetivo
+Ver `../docs/SCENI_ARCHITECTURE_BLUEPRINT.md` para la arquitectura recomendada (frontend, backend, data platform, observabilidad y roadmap).
