@@ -852,6 +852,48 @@ def list_observations(source_id: str | None = None, limit: int = 50) -> List[Dic
     return out
 
 
+
+def value_summary() -> Dict:
+    with db_conn() as conn:
+        top = conn.execute(
+            """
+            SELECT firm_energy_pct, unserved_mwh, irr_pct, total_score, opportunity_id
+            FROM designs_v2
+            ORDER BY rank_pos ASC, total_score DESC
+            """
+        ).fetchall()
+
+    design_count = len(top)
+    if design_count == 0:
+        return {
+            "status": "empty",
+            "message": "Aún no hay simulaciones ejecutadas.",
+            "kpis": {},
+            "data_quality": data_quality_status(),
+        }
+
+    avg_firm = sum(float(r["firm_energy_pct"]) for r in top) / design_count
+    avg_irr = sum(float(r["irr_pct"]) for r in top) / design_count
+    total_unserved = sum(float(r["unserved_mwh"]) for r in top)
+
+    quality = data_quality_status()
+    quality_ok = all(
+        quality[key]["state"] == "fresh"
+        for key in ["grid_constraints", "market_prices", "weather_samples"]
+    )
+
+    return {
+        "status": "ok",
+        "designs_evaluated": design_count,
+        "kpis": {
+            "avg_firm_energy_pct": round(avg_firm, 2),
+            "avg_irr_pct": round(avg_irr, 2),
+            "total_unserved_mwh": round(total_unserved, 2),
+        },
+        "data_quality": quality,
+        "decision_ready": bool(avg_firm >= 70 and avg_irr >= 8 and quality_ok),
+    }
+
 def storage_status() -> Dict:
     with db_conn() as conn:
         opportunities = conn.execute("SELECT COUNT(*) c FROM opportunities").fetchone()["c"]
@@ -915,6 +957,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/v1/storage/status":
             self._send(200, storage_status())
             return
+        if path == "/api/v1/value/summary":
+            self._send(200, value_summary())
+            return
         if path == "/api/v1/opportunities":
             self._send(200, list_opportunities())
             return
@@ -972,6 +1017,7 @@ class Handler(BaseHTTPRequestHandler):
                     "available_endpoints": [
                         "GET /health",
                         "GET /api/v1/storage/status",
+                        "GET /api/v1/value/summary",
                         "POST /api/v1/opportunities",
                         "POST /api/v1/opportunities/{id}/simulate",
                         "GET /api/v1/opportunities/{id}/designs",

@@ -13,6 +13,7 @@ python app/main.py
 ## Endpoints principales
 - `GET /health`
 - `GET /api/v1/storage/status`
+- `GET /api/v1/value/summary`
 - `POST /api/v1/opportunities`
 - `POST /api/v1/opportunities/{id}/simulate`
 - `GET /api/v1/opportunities/{id}/designs`

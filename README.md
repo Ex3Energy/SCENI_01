@@ -134,3 +134,9 @@ powershell -ExecutionPolicy Bypass -File .\compile_and_smoke_test.ps1
 - Si persiste el error, prueba `https://<tu-backend>/health` en navegador.
 - Algunos backends en free tier (ej. Render) tardan 30-60s en despertar (cold start). Usa **Probar conexión backend** y espera ese tiempo antes de reintentar.
 - Puedes forzar backend demo cloud con el botón **Usar backend cloud demo** (apunta a `https://sceni-backend.onrender.com`).
+
+
+## Runbook de salida a producción
+- Revisa `docs/GO_LIVE_RUNBOOK.md` para checklist operativo y KPIs de valor real.
+- Nuevo endpoint de valor: `GET /api/v1/value/summary`.
+- Script de validación integral: `python3 scripts/release_readiness_check.py`
