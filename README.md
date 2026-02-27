@@ -134,6 +134,7 @@ powershell -ExecutionPolicy Bypass -File .\compile_and_smoke_test.ps1
 - Si persiste el error, prueba `https://<tu-backend>/health` en navegador.
 - Algunos backends en free tier (ej. Render) tardan 30-60s en despertar (cold start). Usa **Probar conexión backend** y espera ese tiempo antes de reintentar.
 - Puedes forzar backend demo cloud con el botón **Usar backend cloud demo** (apunta a `https://sceni-backend.onrender.com`).
+- Si GitHub Pages muestra cambios pero tu navegador no, puede ser caché del `app.js`/`styles.css`; ahora el deploy agrega versionado por commit SHA para forzar recarga. Si aún ves versión antigua, haz hard refresh (`Ctrl+F5`).
 
 
 ## Runbook de salida a producción
