@@ -15,6 +15,15 @@ from uuid import uuid4
 ENGINE_VERSION = "sceni-core-0.5.0"
 DB_PATH = os.getenv("SCENI_DB_PATH", str(Path(__file__).resolve().parents[1] / "data" / "sceni.db"))
 
+ERCOT_NODE_CATALOG = {
+    "HB_HOUSTON": {"region": "Houston", "price_bias": 4.0, "volatility_bias": 3.0},
+    "HB_NORTH": {"region": "North", "price_bias": 1.5, "volatility_bias": 1.0},
+    "HB_SOUTH": {"region": "South", "price_bias": 2.1, "volatility_bias": 1.8},
+    "HB_WEST": {"region": "West", "price_bias": -1.8, "volatility_bias": 2.6},
+    "LZ_HOUSTON": {"region": "Houston", "price_bias": 3.2, "volatility_bias": 2.1},
+    "LZ_NORTH": {"region": "North", "price_bias": 1.0, "volatility_bias": 1.0},
+}
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -125,22 +134,36 @@ def init_db() -> None:
         )
 
 
+def list_ercot_nodes() -> List[Dict[str, str | float]]:
+    return [
+        {
+            "node": node,
+            "region": meta["region"],
+            "price_bias": meta["price_bias"],
+            "volatility_bias": meta["volatility_bias"],
+        }
+        for node, meta in ERCOT_NODE_CATALOG.items()
+    ]
+
+
 def market_for_node(node: str) -> Dict[str, float | str]:
-    latest = latest_market_price(node)
+    upper_node = node.upper()
+    latest = latest_market_price(upper_node)
     if latest:
         return {
-            "node": node.upper(),
+            "node": upper_node,
             "avg_price_usd_mwh": round(float(latest["price_usd_mwh"]), 2),
             "volatility_pct": round(float(latest["volatility_pct"] or 20.0), 2),
             "peak_price_usd_mwh": round(float(latest["price_usd_mwh"]) * 1.85, 2),
         }
 
-    seed = sum(ord(ch) for ch in node.upper())
-    base = 42 + (seed % 28)
-    vol = 18 + (seed % 17)
+    seed = sum(ord(ch) for ch in upper_node)
+    meta = ERCOT_NODE_CATALOG.get(upper_node, {"price_bias": 0.0, "volatility_bias": 0.0})
+    base = 42 + (seed % 28) + float(meta["price_bias"])
+    vol = 18 + (seed % 17) + float(meta["volatility_bias"])
     peak = base * (1.7 + (seed % 10) / 20)
     return {
-        "node": node.upper(),
+        "node": upper_node,
         "avg_price_usd_mwh": round(base, 2),
         "volatility_pct": round(vol, 2),
         "peak_price_usd_mwh": round(peak, 2),
@@ -231,12 +254,15 @@ def create_opportunity(payload: Dict) -> Dict:
         "id": str(uuid4()),
         "created_at": now_iso(),
         "name": payload["name"],
-        "ercot_node": payload["ercot_node"],
+        "ercot_node": str(payload["ercot_node"]).upper(),
         "horizon_hours": int(payload.get("horizon_hours", 24)),
         "demand_mw": float(payload["demand_mw"]),
         "poi_limit_mw": float(payload["poi_limit_mw"]),
         "solar_capacity_factor": float(payload.get("solar_capacity_factor", 0.28)),
     }
+    if opportunity["ercot_node"] not in ERCOT_NODE_CATALOG:
+        raise ValueError(f"Nodo ERCOT no soportado: {opportunity['ercot_node']}")
+
     with db_conn() as conn:
         conn.execute(
             """
@@ -966,6 +992,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/v1/data-sources":
             self._send(200, list_data_sources())
             return
+        if path == "/api/v1/ercot/nodes":
+            self._send(200, list_ercot_nodes())
+            return
         if path == "/api/v1/observations":
             source_id = query.get("source_id", [None])[0]
             limit = int(query.get("limit", ["50"])[0])
@@ -1024,6 +1053,7 @@ class Handler(BaseHTTPRequestHandler):
                         "GET /api/v1/snapshots/{snapshot_id}",
                         "GET /api/v1/market/ercot/{node}",
                         "GET /api/v1/data-sources",
+                        "GET /api/v1/ercot/nodes",
                         "POST /api/v1/data-sources",
                         "POST /api/v1/data-sources/{id}/sync",
                         "GET /api/v1/observations?source_id=<id>",

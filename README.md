@@ -6,6 +6,7 @@ Esta versión incluye:
 - **Backend HTTP determinístico** con persistencia SQLite cloud-ready.
 - **Frontend dashboard** para crear oportunidad, simular y comparar diseños.
 - **Capa de ingesta de datos externos** (ERCOT open data vía EIA + meteorología Open-Meteo).
+- Selector de nodo ERCOT desde catálogo backend (`/api/v1/ercot/nodes`) con fallback local para validar simulaciones por nodo.
 
 ## Ejecutar backend (local)
 ```bash
@@ -85,6 +86,7 @@ curl "http://localhost:8000/api/v1/observations?source_id=<SOURCE_ID>&limit=20"
 - `GET /api/v1/network/constraints?node=HB_HOUSTON`
 - `GET /api/v1/market/prices?node=HB_HOUSTON`
 - `GET /api/v1/weather?node=HB_HOUSTON`
+- `GET /api/v1/ercot/nodes`
 
 Ejemplo rápido:
 ```bash

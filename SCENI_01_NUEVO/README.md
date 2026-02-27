@@ -30,6 +30,7 @@ python app/main.py
 - `GET /api/v1/network/constraints?node=HB_HOUSTON`
 - `GET /api/v1/market/prices?node=HB_HOUSTON`
 - `GET /api/v1/weather?node=HB_HOUSTON`
+- `GET /api/v1/ercot/nodes`
 - `GET /docs`
 
 

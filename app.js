@@ -20,6 +20,15 @@ const resilienceFactor = {
 
 const DEMO_CLOUD_BACKEND = "https://sceni-backend.onrender.com";
 
+const fallbackErcotNodes = [
+  { node: "HB_HOUSTON", region: "Houston" },
+  { node: "HB_NORTH", region: "North" },
+  { node: "HB_SOUTH", region: "South" },
+  { node: "HB_WEST", region: "West" },
+  { node: "LZ_HOUSTON", region: "Houston" },
+  { node: "LZ_NORTH", region: "North" },
+];
+
 function getApiBaseFromQuery() {
   const params = new URLSearchParams(window.location.search);
   return params.get("api_base") || "";
@@ -325,6 +334,39 @@ function buildLocalSimulation(payload) {
   };
 }
 
+
+async function loadErcotNodes(apiInput, feedbackNode) {
+  const select = document.getElementById("ercot-node-select");
+  const meta = document.getElementById("ercot-node-meta");
+  if (!select || !meta) return;
+
+  const render = (nodes) => {
+    select.innerHTML = nodes
+      .map((item) => `<option value="${item.node}">${item.node}${item.region ? ` (${item.region})` : ""}</option>`)
+      .join("");
+    if (!select.value) {
+      select.value = "HB_HOUSTON";
+    }
+  };
+
+  render(fallbackErcotNodes);
+  meta.textContent = "Lista base de nodos cargada (fallback local).";
+
+  try {
+    const base = await checkBackendConnection(apiInput.value);
+    const response = await fetch(`${base}/api/v1/ercot/nodes`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const nodes = await response.json();
+    if (!Array.isArray(nodes) || nodes.length === 0) throw new Error("Sin nodos");
+    render(nodes);
+    meta.textContent = `Nodos ERCOT validados desde backend (${nodes.length} nodos).`;
+  } catch (error) {
+    if (feedbackNode) {
+      feedbackNode.textContent = `Aviso: usando catálogo local de nodos ERCOT (${error.message}).`;
+    }
+  }
+}
+
 async function setupDashboard() {
   const form = document.getElementById("opportunity-form");
   const feedback = document.getElementById("dashboard-feedback");
@@ -332,6 +374,7 @@ async function setupDashboard() {
   const useCloudButton = document.getElementById("use-cloud-backend");
   const apiInput = form.querySelector('input[name="apiBaseUrl"]');
   apiInput.value = getInitialApiBaseUrl();
+  await loadErcotNodes(apiInput, feedback);
 
   apiInput.addEventListener("change", () => {
     localStorage.setItem("sceni_api_base_url", apiInput.value.trim());
@@ -357,6 +400,7 @@ async function setupDashboard() {
         autoCorrected = false;
       }
       feedback.textContent = `Conexión OK con backend en ${base}.` + (autoCorrected ? " (URL corregida automáticamente)" : "");
+      await loadErcotNodes(apiInput, feedback);
     } catch (error) {
       feedback.textContent = `Sin conexión backend: ${error.message}`;
     }
