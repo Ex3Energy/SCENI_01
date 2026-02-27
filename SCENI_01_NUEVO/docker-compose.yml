@@ -1,0 +1,7 @@
+services:
+  sceni:
+    build: .
+    container_name: sceni_01_demo
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
